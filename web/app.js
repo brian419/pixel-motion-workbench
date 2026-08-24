@@ -1,57 +1,58 @@
-const $ = id => document.getElementById(id);
-const fileInput = $('fileInput');
-const sourceFrame = $('sourceFrame');
-const outputFrame = $('outputFrame');
-const sourceCanvas = $('sourceCanvas');
-const outputCanvas = $('outputCanvas');
+const fileInput = document.getElementById('fileInput');
+const sourceFrame = document.getElementById('sourceFrame');
+const outputFrame = document.getElementById('outputFrame');
+const sourceCanvas = document.getElementById('sourceCanvas');
+const outputCanvas = document.getElementById('outputCanvas');
 const sourceCtx = sourceCanvas.getContext('2d');
 const outputCtx = outputCanvas.getContext('2d');
-const changeImageButton = $('changeImageButton');
-const toolBar = $('toolBar');
-const clearSelectionButton = $('clearSelectionButton');
-const fileMeta = $('fileMeta');
-const selectionSummary = $('selectionSummary');
-const selectionReadout = $('selectionReadout');
-const pivotReadout = $('pivotReadout');
-const toleranceInput = $('tolerance');
-const toleranceReadout = $('toleranceReadout');
-const rotationInput = $('rotation');
-const translateXInput = $('translateX');
-const translateYInput = $('translateY');
-const exportButton = $('exportButton');
-const status = $('status');
-const zoomOutButton = $('zoomOutButton');
-const zoomInButton = $('zoomInButton');
-const zoomValue = $('zoomValue');
+const changeImageButton = document.getElementById('changeImageButton');
+const toolBar = document.getElementById('toolBar');
+const clearSelectionButton = document.getElementById('clearSelectionButton');
+const fileMeta = document.getElementById('fileMeta');
+const selectionSummary = document.getElementById('selectionSummary');
+const selectionReadout = document.getElementById('selectionReadout');
+const pivotReadout = document.getElementById('pivotReadout');
+const rotationInput = document.getElementById('rotation');
+const translateXInput = document.getElementById('translateX');
+const translateYInput = document.getElementById('translateY');
+const exportButton = document.getElementById('exportButton');
+const status = document.getElementById('status');
+const zoomOutButton = document.getElementById('zoomOutButton');
+const zoomInButton = document.getElementById('zoomInButton');
+const zoomValue = document.getElementById('zoomValue');
 
 const originalCanvas = document.createElement('canvas');
-const originalCtx = originalCanvas.getContext('2d', { willReadFrequently: true });
+const originalCtx = originalCanvas.getContext('2d');
 const maskCanvas = document.createElement('canvas');
-const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+const maskCtx = maskCanvas.getContext('2d');
 const partCanvas = document.createElement('canvas');
 const partCtx = partCanvas.getContext('2d');
 
 let loadedImage = null;
 let fileName = '';
-let tool = 'smart';
-let pivot = null;
-let zoom = 1;
-let selection = null;
+let tool = 'select';
 let lasso = [];
 let drawingLasso = false;
+let pivot = null;
+let zoom = 1;
 
 function setStatus(message, kind = '') {
   status.textContent = message;
   status.className = `status ${kind}`.trim();
 }
 
-function configureCanvases(width, height) {
-  [sourceCanvas, outputCanvas, originalCanvas, maskCanvas, partCanvas].forEach(c => {
-    c.width = width;
-    c.height = height;
-  });
-  [sourceCtx, outputCtx, originalCtx, maskCtx, partCtx].forEach(ctx => { ctx.imageSmoothingEnabled = false; });
-  selection = new Uint8Array(width * height);
+function resetMotion() {
+  lasso = [];
+  pivot = null;
+  drawingLasso = false;
+  rotationInput.value = '0';
+  translateXInput.value = '0';
+  translateYInput.value = '0';
+  [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = true; });
+  selectionReadout.textContent = 'Not selected';
+  pivotReadout.textContent = 'Not set';
+  selectionSummary.textContent = loadedImage ? 'Draw a lasso around the rigid part you want to move.' : 'No image loaded yet.';
+  renderAll();
 }
 
 function chooseDefaultZoom(width, height) {
@@ -64,55 +65,25 @@ function chooseDefaultZoom(width, height) {
 
 function applyZoom() {
   if (!loadedImage) return;
-  const w = Math.max(1, Math.round(sourceCanvas.width * zoom));
-  const h = Math.max(1, Math.round(sourceCanvas.height * zoom));
-  [sourceCanvas, outputCanvas].forEach(c => {
-    c.style.width = `${w}px`;
-    c.style.height = `${h}px`;
+  const width = Math.max(1, Math.round(sourceCanvas.width * zoom));
+  const height = Math.max(1, Math.round(sourceCanvas.height * zoom));
+  [sourceCanvas, outputCanvas].forEach(canvas => {
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
   });
   zoomValue.textContent = `${Math.round(zoom * 100)}%`;
 }
 
-function selectedCount() {
-  if (!selection) return 0;
-  let count = 0;
-  for (const value of selection) count += value ? 1 : 0;
-  return count;
-}
-
-function selectionBounds() {
-  if (!selection) return null;
-  let minX = sourceCanvas.width, minY = sourceCanvas.height, maxX = -1, maxY = -1;
-  for (let y = 0; y < sourceCanvas.height; y++) {
-    for (let x = 0; x < sourceCanvas.width; x++) {
-      if (!selection[y * sourceCanvas.width + x]) continue;
-      minX = Math.min(minX, x); minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
-    }
-  }
-  if (maxX < 0) return null;
-  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
-}
-
-function updateSelectionReadout() {
-  const count = selectedCount();
-  const bounds = selectionBounds();
-  selectionReadout.textContent = bounds ? `${count} pixels · ${bounds.width} × ${bounds.height}px` : 'Not selected';
-  [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = !pivot || !count; });
-}
-
-function resetMotion() {
-  pivot = null;
-  lasso = [];
-  drawingLasso = false;
-  if (selection) selection.fill(0);
-  rotationInput.value = '0';
-  translateXInput.value = '0';
-  translateYInput.value = '0';
-  pivotReadout.textContent = 'Not set';
-  selectionSummary.textContent = loadedImage ? 'Smart Click a connected region, then add or subtract pieces as needed.' : 'No image loaded yet.';
-  updateSelectionReadout();
-  renderAll();
+function configureCanvases(width, height) {
+  [sourceCanvas, outputCanvas, originalCanvas, maskCanvas, partCanvas].forEach(canvas => {
+    canvas.width = width;
+    canvas.height = height;
+  });
+  sourceCtx.imageSmoothingEnabled = false;
+  outputCtx.imageSmoothingEnabled = false;
+  originalCtx.imageSmoothingEnabled = false;
+  maskCtx.imageSmoothingEnabled = false;
+  partCtx.imageSmoothingEnabled = false;
 }
 
 function loadFile(file) {
@@ -123,7 +94,7 @@ function loadFile(file) {
     loadedImage = image;
     fileName = file.name;
     configureCanvases(image.naturalWidth, image.naturalHeight);
-    originalCtx.clearRect(0, 0, image.naturalWidth, image.naturalHeight);
+    originalCtx.clearRect(0, 0, originalCanvas.width, originalCanvas.height);
     originalCtx.drawImage(image, 0, 0);
     sourceFrame.classList.add('has-image');
     outputFrame.classList.add('has-image');
@@ -135,24 +106,25 @@ function loadFile(file) {
     fileMeta.textContent = `${file.name} · ${image.naturalWidth} × ${image.naturalHeight}px`;
     resetMotion();
     applyZoom();
-    setTool('smart');
-    setStatus('Image loaded. Smart Click a piece of the part you want to move.', 'success');
+    setTool('select');
+    setStatus('Image loaded. Draw a lasso around one rigid part.', 'success');
     URL.revokeObjectURL(url);
   };
-  image.onerror = () => { URL.revokeObjectURL(url); setStatus('That image could not be opened.', 'error'); };
+  image.onerror = () => {
+    URL.revokeObjectURL(url);
+    setStatus('That image could not be opened.', 'error');
+  };
   image.src = url;
 }
 
 function setTool(nextTool) {
   tool = nextTool;
-  document.querySelectorAll('.tool-button').forEach(button => button.classList.toggle('active', button.dataset.tool === tool));
-  if (['smart', 'add', 'subtract'].includes(tool)) {
+  document.querySelectorAll('.tool-button').forEach(button => {
+    button.classList.toggle('active', button.dataset.tool === tool);
+  });
+  if (tool === 'select') {
     sourceCanvas.style.cursor = 'crosshair';
-    const action = tool === 'smart' ? 'replace the selection with' : tool === 'add' ? 'add' : 'remove';
-    selectionSummary.textContent = `Click a connected pixel region to ${action} that region.`;
-  } else if (tool === 'lasso') {
-    sourceCanvas.style.cursor = 'crosshair';
-    selectionSummary.textContent = 'Draw a freehand lasso. It replaces the current smart selection.';
+    selectionSummary.textContent = lasso.length >= 3 ? 'Selection ready. Redraw it at any time, or set the pivot.' : 'Draw a loose lasso around the rigid part you want to move.';
   } else if (tool === 'pivot') {
     sourceCanvas.style.cursor = 'cell';
     selectionSummary.textContent = 'Click the hinge or attachment point for the selected part.';
@@ -164,71 +136,28 @@ function setTool(nextTool) {
 
 function canvasPoint(event) {
   const rect = sourceCanvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * (sourceCanvas.width / rect.width);
+  const y = (event.clientY - rect.top) * (sourceCanvas.height / rect.height);
   return {
-    x: Math.max(0, Math.min(sourceCanvas.width - 1, Math.floor((event.clientX - rect.left) * sourceCanvas.width / rect.width))),
-    y: Math.max(0, Math.min(sourceCanvas.height - 1, Math.floor((event.clientY - rect.top) * sourceCanvas.height / rect.height)))
+    x: Math.max(0, Math.min(sourceCanvas.width - 1, x)),
+    y: Math.max(0, Math.min(sourceCanvas.height - 1, y))
   };
-}
-
-function colorDistance(a, b) {
-  const dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2];
-  return Math.sqrt(dr * dr + dg * dg + db * db);
-}
-
-function floodRegion(startX, startY) {
-  const w = originalCanvas.width, h = originalCanvas.height;
-  const image = originalCtx.getImageData(0, 0, w, h).data;
-  const seedIndex = (startY * w + startX) * 4;
-  if (image[seedIndex + 3] < 16) return [];
-  const seed = [image[seedIndex], image[seedIndex + 1], image[seedIndex + 2]];
-  const threshold = Number(toleranceInput.value) * 4.42;
-  const seen = new Uint8Array(w * h);
-  const queue = [[startX, startY]];
-  const result = [];
-  seen[startY * w + startX] = 1;
-  const neighbors = [[1,0],[-1,0],[0,1],[0,-1]];
-
-  while (queue.length) {
-    const [x, y] = queue.shift();
-    const i = (y * w + x) * 4;
-    if (image[i + 3] < 16) continue;
-    const pixel = [image[i], image[i + 1], image[i + 2]];
-    if (colorDistance(pixel, seed) > threshold) continue;
-    result.push(y * w + x);
-    for (const [dx, dy] of neighbors) {
-      const nx = x + dx, ny = y + dy;
-      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-      const ni = ny * w + nx;
-      if (!seen[ni]) { seen[ni] = 1; queue.push([nx, ny]); }
-    }
-  }
-  return result;
-}
-
-function applyRegion(indices, mode) {
-  if (mode === 'smart') selection.fill(0);
-  for (const index of indices) selection[index] = mode === 'subtract' ? 0 : 1;
-  pivot = null;
-  pivotReadout.textContent = 'Not set';
-  updateSelectionReadout();
-  renderAll();
-  setStatus(`${mode === 'subtract' ? 'Removed' : mode === 'add' ? 'Added' : 'Selected'} ${indices.length} connected pixels.`, 'success');
 }
 
 function buildMask() {
   maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-  if (!selection || !selectedCount()) return;
-  const image = maskCtx.createImageData(maskCanvas.width, maskCanvas.height);
-  for (let i = 0; i < selection.length; i++) {
-    if (!selection[i]) continue;
-    const p = i * 4;
-    image.data[p] = image.data[p + 1] = image.data[p + 2] = image.data[p + 3] = 255;
-  }
-  maskCtx.putImageData(image, 0, 0);
+  if (lasso.length < 3) return;
+  maskCtx.fillStyle = '#fff';
+  maskCtx.beginPath();
+  maskCtx.moveTo(lasso[0].x, lasso[0].y);
+  for (let i = 1; i < lasso.length; i += 1) maskCtx.lineTo(lasso[i].x, lasso[i].y);
+  maskCtx.closePath();
+  maskCtx.fill();
 }
 
 function buildPart() {
   partCtx.clearRect(0, 0, partCanvas.width, partCanvas.height);
+  if (lasso.length < 3) return;
   buildMask();
   partCtx.drawImage(originalCanvas, 0, 0);
   partCtx.globalCompositeOperation = 'destination-in';
@@ -236,29 +165,50 @@ function buildPart() {
   partCtx.globalCompositeOperation = 'source-over';
 }
 
+function boundsFromLasso() {
+  if (lasso.length < 3) return null;
+  const xs = lasso.map(point => point.x);
+  const ys = lasso.map(point => point.y);
+  return {
+    x: Math.floor(Math.min(...xs)),
+    y: Math.floor(Math.min(...ys)),
+    width: Math.max(1, Math.ceil(Math.max(...xs) - Math.min(...xs))),
+    height: Math.max(1, Math.ceil(Math.max(...ys) - Math.min(...ys)))
+  };
+}
+
 function renderSource() {
   sourceCtx.clearRect(0, 0, sourceCanvas.width, sourceCanvas.height);
   if (!loadedImage) return;
   sourceCtx.drawImage(originalCanvas, 0, 0);
-  if (selection && selectedCount()) {
+  if (lasso.length >= 2) {
     sourceCtx.save();
-    sourceCtx.globalAlpha = 0.32;
-    sourceCtx.fillStyle = '#2997ff';
-    for (let y = 0; y < sourceCanvas.height; y++) for (let x = 0; x < sourceCanvas.width; x++) {
-      if (selection[y * sourceCanvas.width + x]) sourceCtx.fillRect(x, y, 1, 1);
-    }
+    sourceCtx.strokeStyle = '#2997ff';
+    sourceCtx.lineWidth = Math.max(1, 1 / zoom);
+    sourceCtx.setLineDash([Math.max(2, 3 / zoom), Math.max(2, 2 / zoom)]);
+    sourceCtx.beginPath();
+    sourceCtx.moveTo(lasso[0].x, lasso[0].y);
+    for (let i = 1; i < lasso.length; i += 1) sourceCtx.lineTo(lasso[i].x, lasso[i].y);
+    if (!drawingLasso && lasso.length >= 3) sourceCtx.closePath();
+    sourceCtx.stroke();
     sourceCtx.restore();
   }
-  if (drawingLasso && lasso.length > 1) {
-    sourceCtx.save(); sourceCtx.strokeStyle = '#2997ff'; sourceCtx.lineWidth = Math.max(1, 1 / zoom);
-    sourceCtx.beginPath(); sourceCtx.moveTo(lasso[0].x, lasso[0].y);
-    for (let i = 1; i < lasso.length; i++) sourceCtx.lineTo(lasso[i].x, lasso[i].y);
-    sourceCtx.stroke(); sourceCtx.restore();
-  }
   if (pivot) {
-    sourceCtx.save(); sourceCtx.strokeStyle = sourceCtx.fillStyle = '#ff3b30';
-    const r = Math.max(2, 3 / zoom); sourceCtx.beginPath(); sourceCtx.arc(pivot.x, pivot.y, r, 0, Math.PI * 2); sourceCtx.fill();
-    sourceCtx.beginPath(); sourceCtx.moveTo(pivot.x-r*2,pivot.y); sourceCtx.lineTo(pivot.x+r*2,pivot.y); sourceCtx.moveTo(pivot.x,pivot.y-r*2); sourceCtx.lineTo(pivot.x,pivot.y+r*2); sourceCtx.stroke(); sourceCtx.restore();
+    sourceCtx.save();
+    sourceCtx.strokeStyle = '#ff3b30';
+    sourceCtx.fillStyle = '#ff3b30';
+    sourceCtx.lineWidth = Math.max(1, 1 / zoom);
+    const r = Math.max(2, 3 / zoom);
+    sourceCtx.beginPath();
+    sourceCtx.arc(pivot.x, pivot.y, r, 0, Math.PI * 2);
+    sourceCtx.fill();
+    sourceCtx.beginPath();
+    sourceCtx.moveTo(pivot.x - r * 2, pivot.y);
+    sourceCtx.lineTo(pivot.x + r * 2, pivot.y);
+    sourceCtx.moveTo(pivot.x, pivot.y - r * 2);
+    sourceCtx.lineTo(pivot.x, pivot.y + r * 2);
+    sourceCtx.stroke();
+    sourceCtx.restore();
   }
 }
 
@@ -266,70 +216,134 @@ function renderOutput() {
   outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
   if (!loadedImage) return;
   outputCtx.drawImage(originalCanvas, 0, 0);
-  if (!selection || !selectedCount()) return;
-  buildPart(); buildMask();
-  outputCtx.save(); outputCtx.globalCompositeOperation = 'destination-out'; outputCtx.drawImage(maskCanvas, 0, 0); outputCtx.restore();
-  const bounds = selectionBounds();
-  const activePivot = pivot || { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+  if (lasso.length < 3) return;
+
+  buildPart();
+  buildMask();
+
+  outputCtx.save();
+  outputCtx.globalCompositeOperation = 'destination-out';
+  outputCtx.drawImage(maskCanvas, 0, 0);
+  outputCtx.restore();
+
+  const activePivot = pivot || (() => {
+    const bounds = boundsFromLasso();
+    return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+  })();
   const angle = Number(rotationInput.value || 0) * Math.PI / 180;
-  const dx = Number(translateXInput.value || 0), dy = Number(translateYInput.value || 0);
-  outputCtx.save(); outputCtx.translate(activePivot.x + dx, activePivot.y + dy); outputCtx.rotate(angle); outputCtx.translate(-activePivot.x, -activePivot.y); outputCtx.drawImage(partCanvas, 0, 0); outputCtx.restore();
+  const dx = Number(translateXInput.value || 0);
+  const dy = Number(translateYInput.value || 0);
+
+  outputCtx.save();
+  outputCtx.translate(activePivot.x + dx, activePivot.y + dy);
+  outputCtx.rotate(angle);
+  outputCtx.translate(-activePivot.x, -activePivot.y);
+  outputCtx.drawImage(partCanvas, 0, 0);
+  outputCtx.restore();
 }
 
-function renderAll() { renderSource(); renderOutput(); }
-
-function lassoToSelection() {
-  if (lasso.length < 3) return false;
-  const temp = document.createElement('canvas'); temp.width = sourceCanvas.width; temp.height = sourceCanvas.height;
-  const ctx = temp.getContext('2d', { willReadFrequently: true }); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(lasso[0].x, lasso[0].y);
-  for (let i = 1; i < lasso.length; i++) ctx.lineTo(lasso[i].x, lasso[i].y); ctx.closePath(); ctx.fill();
-  const data = ctx.getImageData(0, 0, temp.width, temp.height).data; selection.fill(0);
-  for (let i = 0; i < selection.length; i++) if (data[i * 4 + 3]) selection[i] = 1;
-  return true;
+function renderAll() {
+  renderSource();
+  renderOutput();
 }
 
 sourceCanvas.addEventListener('pointerdown', event => {
   if (!loadedImage) return;
-  const point = canvasPoint(event);
-  if (['smart','add','subtract'].includes(tool)) {
-    const region = floodRegion(point.x, point.y);
-    if (!region.length) return setStatus('No opaque connected region was found there.', 'error');
-    applyRegion(region, tool);
-  } else if (tool === 'lasso') {
-    sourceCanvas.setPointerCapture(event.pointerId); drawingLasso = true; lasso = [point]; renderSource();
-  } else if (tool === 'pivot' && selectedCount()) {
-    pivot = point; pivotReadout.textContent = `(${point.x}, ${point.y})`; updateSelectionReadout(); selectionSummary.textContent = 'Pivot set. Adjust rotation or translation.'; setStatus('Pivot set. Motion controls are ready.', 'success'); renderAll();
+  if (tool === 'select') {
+    sourceCanvas.setPointerCapture(event.pointerId);
+    drawingLasso = true;
+    lasso = [canvasPoint(event)];
+    pivot = null;
+    renderAll();
+  } else if (tool === 'pivot' && lasso.length >= 3) {
+    pivot = canvasPoint(event);
+    pivotReadout.textContent = `(${Math.round(pivot.x)}, ${Math.round(pivot.y)})`;
+    [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = false; });
+    selectionSummary.textContent = 'Pivot set. Adjust rotation or translation to build the candidate frame.';
+    setStatus('Pivot set. Motion controls are ready.', 'success');
+    renderAll();
   }
 });
 
 sourceCanvas.addEventListener('pointermove', event => {
-  if (!drawingLasso || tool !== 'lasso') return;
-  const p = canvasPoint(event), last = lasso[lasso.length - 1];
-  if (!last || Math.hypot(p.x-last.x,p.y-last.y) >= 0.5) { lasso.push(p); renderSource(); }
+  if (!drawingLasso || tool !== 'select') return;
+  const point = canvasPoint(event);
+  const last = lasso[lasso.length - 1];
+  if (!last || Math.hypot(point.x - last.x, point.y - last.y) >= 0.5) {
+    lasso.push(point);
+    renderSource();
+  }
 });
 
 sourceCanvas.addEventListener('pointerup', event => {
-  if (!drawingLasso || tool !== 'lasso') return;
-  drawingLasso = false; if (sourceCanvas.hasPointerCapture(event.pointerId)) sourceCanvas.releasePointerCapture(event.pointerId);
-  if (!lassoToSelection()) return setStatus('The lasso was too small.', 'error');
-  pivot = null; pivotReadout.textContent = 'Not set'; updateSelectionReadout(); renderAll(); setStatus('Lasso selection created. Set the pivot next.', 'success');
+  if (!drawingLasso || tool !== 'select') return;
+  drawingLasso = false;
+  if (sourceCanvas.hasPointerCapture(event.pointerId)) sourceCanvas.releasePointerCapture(event.pointerId);
+  if (lasso.length < 3) {
+    lasso = [];
+    setStatus('The selection was too small. Draw a loop around the part.', 'error');
+  } else {
+    const bounds = boundsFromLasso();
+    selectionReadout.textContent = `${bounds.width} × ${bounds.height}px region near (${bounds.x}, ${bounds.y})`;
+    pivotReadout.textContent = 'Not set';
+    [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = true; });
+    selectionSummary.textContent = 'Selection ready. Click Set Pivot, then click its hinge or attachment point.';
+    setStatus('Part selected. Set its pivot next.', 'success');
+  }
+  renderAll();
 });
 
 [sourceFrame, outputFrame].forEach(frame => {
-  frame.addEventListener('dragover', e => { e.preventDefault(); frame.classList.add('dragging'); });
+  frame.addEventListener('dragover', event => { event.preventDefault(); frame.classList.add('dragging'); });
   frame.addEventListener('dragleave', () => frame.classList.remove('dragging'));
-  frame.addEventListener('drop', e => { e.preventDefault(); frame.classList.remove('dragging'); loadFile(e.dataTransfer.files[0]); });
+  frame.addEventListener('drop', event => {
+    event.preventDefault();
+    frame.classList.remove('dragging');
+    loadFile(event.dataTransfer.files[0]);
+  });
 });
-sourceFrame.addEventListener('click', e => { if (!loadedImage && e.target !== sourceCanvas) fileInput.click(); });
+
+sourceFrame.addEventListener('click', event => {
+  if (!loadedImage && event.target !== sourceCanvas) fileInput.click();
+});
 changeImageButton.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => loadFile(fileInput.files[0]));
-document.querySelectorAll('.tool-button').forEach(button => button.addEventListener('click', () => setTool(button.dataset.tool)));
-clearSelectionButton.addEventListener('click', () => { resetMotion(); setTool('smart'); setStatus('Selection cleared. Smart Click a new part.'); });
-[rotationInput, translateXInput, translateYInput].forEach(input => input.addEventListener('input', () => { renderOutput(); setStatus('Candidate frame updated.', 'success'); }));
-toleranceInput.addEventListener('input', () => { toleranceReadout.textContent = `${toleranceInput.value}. Lower values stay closer to the clicked color. Higher values cross more shading variation.`; });
-zoomOutButton.addEventListener('click', () => { zoom = Math.max(0.25, zoom / 2); applyZoom(); renderAll(); });
-zoomInButton.addEventListener('click', () => { zoom = Math.min(64, zoom * 2); applyZoom(); renderAll(); });
+
+document.querySelectorAll('.tool-button').forEach(button => {
+  button.addEventListener('click', () => setTool(button.dataset.tool));
+});
+
+clearSelectionButton.addEventListener('click', () => {
+  resetMotion();
+  setTool('select');
+  setStatus('Selection cleared. Draw a new lasso around a rigid part.');
+});
+
+[rotationInput, translateXInput, translateYInput].forEach(input => {
+  input.addEventListener('input', () => {
+    renderOutput();
+    setStatus('Candidate frame updated.', 'success');
+  });
+});
+
+zoomOutButton.addEventListener('click', () => {
+  zoom = Math.max(0.25, zoom / 2);
+  applyZoom();
+  renderAll();
+});
+zoomInButton.addEventListener('click', () => {
+  zoom = Math.min(64, zoom * 2);
+  applyZoom();
+  renderAll();
+});
+
 exportButton.addEventListener('click', () => {
-  if (!loadedImage || !pivot || !selectedCount()) return;
-  renderOutput(); const link = document.createElement('a'); const base = fileName.replace(/\.[^.]+$/, '') || 'frame'; link.download = `${base}-motion-frame.png`; link.href = outputCanvas.toDataURL('image/png'); link.click(); setStatus(`Exported ${link.download}.`, 'success');
+  if (!loadedImage || !pivot || lasso.length < 3) return;
+  renderOutput();
+  const link = document.createElement('a');
+  const base = fileName.replace(/\.[^.]+$/, '') || 'frame';
+  link.download = `${base}-motion-frame.png`;
+  link.href = outputCanvas.toDataURL('image/png');
+  link.click();
+  setStatus(`Exported ${link.download}.`, 'success');
 });
