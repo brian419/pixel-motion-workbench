@@ -1,5 +1,4 @@
 const $ = id => document.getElementById(id);
-
 const fileInput = $('fileInput');
 const sourceFrame = $('sourceFrame');
 const outputFrame = $('outputFrame');
@@ -14,10 +13,8 @@ const fileMeta = $('fileMeta');
 const selectionSummary = $('selectionSummary');
 const selectionReadout = $('selectionReadout');
 const pivotReadout = $('pivotReadout');
-const segmentationStrengthInput = $('segmentationStrength');
-const segmentationReadout = $('segmentationReadout');
-const brushSizeInput = $('brushSize');
-const brushReadout = $('brushReadout');
+const toleranceInput = $('tolerance');
+const toleranceReadout = $('toleranceReadout');
 const rotationInput = $('rotation');
 const translateXInput = $('translateX');
 const translateYInput = $('translateY');
@@ -33,22 +30,15 @@ const maskCanvas = document.createElement('canvas');
 const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
 const partCanvas = document.createElement('canvas');
 const partCtx = partCanvas.getContext('2d');
-const roiCanvas = document.createElement('canvas');
-const roiCtx = roiCanvas.getContext('2d', { willReadFrequently: true });
 
 let loadedImage = null;
 let fileName = '';
-let tool = 'rough';
-let zoom = 1;
+let tool = 'smart';
 let pivot = null;
+let zoom = 1;
 let selection = null;
-let roiMask = null;
-let includeSeeds = null;
-let excludeSeeds = null;
-let roughLasso = [];
-let drawing = false;
-let lastBrushPoint = null;
-let sourcePixels = null;
+let lasso = [];
+let drawingLasso = false;
 
 function setStatus(message, kind = '') {
   status.textContent = message;
@@ -56,17 +46,12 @@ function setStatus(message, kind = '') {
 }
 
 function configureCanvases(width, height) {
-  [sourceCanvas, outputCanvas, originalCanvas, maskCanvas, partCanvas, roiCanvas].forEach(canvas => {
-    canvas.width = width;
-    canvas.height = height;
+  [sourceCanvas, outputCanvas, originalCanvas, maskCanvas, partCanvas].forEach(c => {
+    c.width = width;
+    c.height = height;
   });
-  [sourceCtx, outputCtx, originalCtx, maskCtx, partCtx, roiCtx].forEach(ctx => {
-    ctx.imageSmoothingEnabled = false;
-  });
+  [sourceCtx, outputCtx, originalCtx, maskCtx, partCtx].forEach(ctx => { ctx.imageSmoothingEnabled = false; });
   selection = new Uint8Array(width * height);
-  roiMask = new Uint8Array(width * height);
-  includeSeeds = new Uint8Array(width * height);
-  excludeSeeds = new Uint8Array(width * height);
 }
 
 function chooseDefaultZoom(width, height) {
@@ -79,11 +64,11 @@ function chooseDefaultZoom(width, height) {
 
 function applyZoom() {
   if (!loadedImage) return;
-  const width = Math.max(1, Math.round(sourceCanvas.width * zoom));
-  const height = Math.max(1, Math.round(sourceCanvas.height * zoom));
-  [sourceCanvas, outputCanvas].forEach(canvas => {
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
+  const w = Math.max(1, Math.round(sourceCanvas.width * zoom));
+  const h = Math.max(1, Math.round(sourceCanvas.height * zoom));
+  [sourceCanvas, outputCanvas].forEach(c => {
+    c.style.width = `${w}px`;
+    c.style.height = `${h}px`;
   });
   zoomValue.textContent = `${Math.round(zoom * 100)}%`;
 }
@@ -97,23 +82,14 @@ function selectedCount() {
 
 function selectionBounds() {
   if (!selection) return null;
-  const width = sourceCanvas.width;
-  const height = sourceCanvas.height;
-  let minX = width;
-  let minY = height;
-  let maxX = -1;
-  let maxY = -1;
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      if (!selection[y * width + x]) continue;
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
+  let minX = sourceCanvas.width, minY = sourceCanvas.height, maxX = -1, maxY = -1;
+  for (let y = 0; y < sourceCanvas.height; y++) {
+    for (let x = 0; x < sourceCanvas.width; x++) {
+      if (!selection[y * sourceCanvas.width + x]) continue;
+      minX = Math.min(minX, x); minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
     }
   }
-
   if (maxX < 0) return null;
   return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
 }
@@ -122,26 +98,19 @@ function updateSelectionReadout() {
   const count = selectedCount();
   const bounds = selectionBounds();
   selectionReadout.textContent = bounds ? `${count} pixels · ${bounds.width} × ${bounds.height}px` : 'Not selected';
-  const enabled = Boolean(pivot && count);
-  [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = !enabled; });
+  [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = !pivot || !count; });
 }
 
 function resetMotion() {
   pivot = null;
-  roughLasso = [];
-  drawing = false;
-  lastBrushPoint = null;
+  lasso = [];
+  drawingLasso = false;
   if (selection) selection.fill(0);
-  if (roiMask) roiMask.fill(0);
-  if (includeSeeds) includeSeeds.fill(0);
-  if (excludeSeeds) excludeSeeds.fill(0);
   rotationInput.value = '0';
   translateXInput.value = '0';
   translateYInput.value = '0';
   pivotReadout.textContent = 'Not set';
-  selectionSummary.textContent = loadedImage
-    ? 'Draw one loose Rough Lasso around the complete moving part.'
-    : 'No image loaded yet.';
+  selectionSummary.textContent = loadedImage ? 'Smart Click a connected region, then add or subtract pieces as needed.' : 'No image loaded yet.';
   updateSelectionReadout();
   renderAll();
 }
@@ -150,14 +119,12 @@ function loadFile(file) {
   if (!file || !file.type.startsWith('image/')) return;
   const url = URL.createObjectURL(file);
   const image = new Image();
-
   image.onload = () => {
     loadedImage = image;
     fileName = file.name;
     configureCanvases(image.naturalWidth, image.naturalHeight);
     originalCtx.clearRect(0, 0, image.naturalWidth, image.naturalHeight);
     originalCtx.drawImage(image, 0, 0);
-    sourcePixels = originalCtx.getImageData(0, 0, image.naturalWidth, image.naturalHeight).data;
     sourceFrame.classList.add('has-image');
     outputFrame.classList.add('has-image');
     changeImageButton.hidden = false;
@@ -168,34 +135,24 @@ function loadFile(file) {
     fileMeta.textContent = `${file.name} · ${image.naturalWidth} × ${image.naturalHeight}px`;
     resetMotion();
     applyZoom();
-    setTool('rough');
-    setStatus('Image loaded. Draw one loose lasso around the complete moving part.', 'success');
+    setTool('smart');
+    setStatus('Image loaded. Smart Click a piece of the part you want to move.', 'success');
     URL.revokeObjectURL(url);
   };
-
-  image.onerror = () => {
-    URL.revokeObjectURL(url);
-    setStatus('That image could not be opened.', 'error');
-  };
-
+  image.onerror = () => { URL.revokeObjectURL(url); setStatus('That image could not be opened.', 'error'); };
   image.src = url;
 }
 
 function setTool(nextTool) {
   tool = nextTool;
-  document.querySelectorAll('.tool-button').forEach(button => {
-    button.classList.toggle('active', button.dataset.tool === tool);
-  });
-
-  if (tool === 'rough') {
+  document.querySelectorAll('.tool-button').forEach(button => button.classList.toggle('active', button.dataset.tool === tool));
+  if (['smart', 'add', 'subtract'].includes(tool)) {
     sourceCanvas.style.cursor = 'crosshair';
-    selectionSummary.textContent = 'Draw one loose loop around the entire moving part. The algorithm will propose a unified mask.';
-  } else if (tool === 'include') {
+    const action = tool === 'smart' ? 'replace the selection with' : tool === 'add' ? 'add' : 'remove';
+    selectionSummary.textContent = `Click a connected pixel region to ${action} that region.`;
+  } else if (tool === 'lasso') {
     sourceCanvas.style.cursor = 'crosshair';
-    selectionSummary.textContent = 'Paint over missing part pixels. The green stroke is treated as definitely part of the object.';
-  } else if (tool === 'exclude') {
-    sourceCanvas.style.cursor = 'crosshair';
-    selectionSummary.textContent = 'Paint over unwanted pixels. The red stroke is treated as definitely outside the moving part.';
+    selectionSummary.textContent = 'Draw a freehand lasso. It replaces the current smart selection.';
   } else if (tool === 'pivot') {
     sourceCanvas.style.cursor = 'cell';
     selectionSummary.textContent = 'Click the hinge or attachment point for the selected part.';
@@ -213,315 +170,59 @@ function canvasPoint(event) {
   };
 }
 
-function rasterizeRoughLasso() {
-  if (roughLasso.length < 3) return false;
-  roiCtx.clearRect(0, 0, roiCanvas.width, roiCanvas.height);
-  roiCtx.fillStyle = '#fff';
-  roiCtx.beginPath();
-  roiCtx.moveTo(roughLasso[0].x + 0.5, roughLasso[0].y + 0.5);
-  for (let i = 1; i < roughLasso.length; i += 1) {
-    roiCtx.lineTo(roughLasso[i].x + 0.5, roughLasso[i].y + 0.5);
-  }
-  roiCtx.closePath();
-  roiCtx.fill();
-
-  const data = roiCtx.getImageData(0, 0, roiCanvas.width, roiCanvas.height).data;
-  roiMask.fill(0);
-  let count = 0;
-  for (let i = 0; i < roiMask.length; i += 1) {
-    if (data[i * 4 + 3] > 0) {
-      roiMask[i] = 1;
-      count += 1;
-    }
-  }
-  return count >= 4;
+function colorDistance(a, b) {
+  const dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2];
+  return Math.sqrt(dr * dr + dg * dg + db * db);
 }
 
-function colorAt(index) {
-  const pixel = index * 4;
-  return [sourcePixels[pixel], sourcePixels[pixel + 1], sourcePixels[pixel + 2], sourcePixels[pixel + 3]];
-}
-
-function squaredColorDistance(a, b) {
-  const dr = a[0] - b[0];
-  const dg = a[1] - b[1];
-  const db = a[2] - b[2];
-  return dr * dr + dg * dg + db * db;
-}
-
-function collectBoundaryBackgroundSamples() {
-  const width = sourceCanvas.width;
-  const height = sourceCanvas.height;
-  const samples = [];
-  const radius = 2;
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const index = y * width + x;
-      if (roiMask[index]) continue;
-
-      let nearRoi = false;
-      for (let oy = -radius; oy <= radius && !nearRoi; oy += 1) {
-        for (let ox = -radius; ox <= radius; ox += 1) {
-          const nx = x + ox;
-          const ny = y + oy;
-          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-          if (roiMask[ny * width + nx]) {
-            nearRoi = true;
-            break;
-          }
-        }
-      }
-
-      if (nearRoi) {
-        const color = colorAt(index);
-        if (color[3] >= 16) samples.push(color);
-      }
-    }
-  }
-
-  return downsampleColors(samples, 280);
-}
-
-function collectForegroundSamples() {
-  const width = sourceCanvas.width;
-  const height = sourceCanvas.height;
-  const explicit = [];
-  const automatic = [];
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const index = y * width + x;
-      if (!roiMask[index]) continue;
-      const color = colorAt(index);
-      if (color[3] < 16) continue;
-      if (includeSeeds[index]) {
-        explicit.push(color);
-        continue;
-      }
-
-      let boundary = false;
-      for (let oy = -2; oy <= 2 && !boundary; oy += 1) {
-        for (let ox = -2; ox <= 2; ox += 1) {
-          const nx = x + ox;
-          const ny = y + oy;
-          if (nx < 0 || ny < 0 || nx >= width || ny >= height || !roiMask[ny * width + nx]) {
-            boundary = true;
-            break;
-          }
-        }
-      }
-      if (!boundary) automatic.push(color);
-    }
-  }
-
-  const combined = explicit.length ? explicit.concat(downsampleColors(automatic, 180)) : automatic;
-  return downsampleColors(combined, 320);
-}
-
-function collectExcludeSamples() {
-  const samples = [];
-  for (let i = 0; i < excludeSeeds.length; i += 1) {
-    if (!excludeSeeds[i]) continue;
-    const color = colorAt(i);
-    if (color[3] >= 16) samples.push(color);
-  }
-  return downsampleColors(samples, 220);
-}
-
-function downsampleColors(colors, limit) {
-  if (colors.length <= limit) return colors;
+function floodRegion(startX, startY) {
+  const w = originalCanvas.width, h = originalCanvas.height;
+  const image = originalCtx.getImageData(0, 0, w, h).data;
+  const seedIndex = (startY * w + startX) * 4;
+  if (image[seedIndex + 3] < 16) return [];
+  const seed = [image[seedIndex], image[seedIndex + 1], image[seedIndex + 2]];
+  const threshold = Number(toleranceInput.value) * 4.42;
+  const seen = new Uint8Array(w * h);
+  const queue = [[startX, startY]];
   const result = [];
-  const step = colors.length / limit;
-  for (let i = 0; i < limit; i += 1) result.push(colors[Math.floor(i * step)]);
+  seen[startY * w + startX] = 1;
+  const neighbors = [[1,0],[-1,0],[0,1],[0,-1]];
+
+  while (queue.length) {
+    const [x, y] = queue.shift();
+    const i = (y * w + x) * 4;
+    if (image[i + 3] < 16) continue;
+    const pixel = [image[i], image[i + 1], image[i + 2]];
+    if (colorDistance(pixel, seed) > threshold) continue;
+    result.push(y * w + x);
+    for (const [dx, dy] of neighbors) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+      const ni = ny * w + nx;
+      if (!seen[ni]) { seen[ni] = 1; queue.push([nx, ny]); }
+    }
+  }
   return result;
 }
 
-function nearestColorDistance(color, samples) {
-  if (!samples.length) return Number.POSITIVE_INFINITY;
-  let best = Number.POSITIVE_INFINITY;
-  for (const sample of samples) {
-    const distance = squaredColorDistance(color, sample);
-    if (distance < best) best = distance;
-  }
-  return best;
-}
-
-function smoothSelectionOnce(input) {
-  const width = sourceCanvas.width;
-  const height = sourceCanvas.height;
-  const output = new Uint8Array(input);
-  const offsets = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const index = y * width + x;
-      if (!roiMask[index] || includeSeeds[index] || excludeSeeds[index]) continue;
-      let neighbors = 0;
-      let selected = 0;
-      for (const [ox, oy] of offsets) {
-        const nx = x + ox;
-        const ny = y + oy;
-        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-        const ni = ny * width + nx;
-        if (!roiMask[ni]) continue;
-        neighbors += 1;
-        selected += input[ni] ? 1 : 0;
-      }
-      if (neighbors >= 4) {
-        if (selected >= Math.ceil(neighbors * 0.68)) output[index] = 1;
-        if (selected <= Math.floor(neighbors * 0.22)) output[index] = 0;
-      }
-    }
-  }
-  return output;
-}
-
-function keepLargestSeededComponents(input) {
-  const width = sourceCanvas.width;
-  const height = sourceCanvas.height;
-  const seen = new Uint8Array(input.length);
-  const components = [];
-  const offsets = [[1,0],[-1,0],[0,1],[0,-1]];
-
-  for (let i = 0; i < input.length; i += 1) {
-    if (!input[i] || seen[i]) continue;
-    const queue = [i];
-    const component = [];
-    let containsInclude = false;
-    seen[i] = 1;
-
-    for (let qi = 0; qi < queue.length; qi += 1) {
-      const index = queue[qi];
-      component.push(index);
-      if (includeSeeds[index]) containsInclude = true;
-      const x = index % width;
-      const y = Math.floor(index / width);
-      for (const [ox, oy] of offsets) {
-        const nx = x + ox;
-        const ny = y + oy;
-        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-        const ni = ny * width + nx;
-        if (input[ni] && !seen[ni]) {
-          seen[ni] = 1;
-          queue.push(ni);
-        }
-      }
-    }
-    components.push({ pixels: component, containsInclude });
-  }
-
-  if (!components.length) return input;
-  components.sort((a, b) => b.pixels.length - a.pixels.length);
-  const output = new Uint8Array(input.length);
-  const keep = components.filter((component, index) => component.containsInclude || index < 3);
-  for (const component of keep) {
-    for (const index of component.pixels) output[index] = 1;
-  }
-  for (let i = 0; i < includeSeeds.length; i += 1) {
-    if (includeSeeds[i]) output[i] = 1;
-    if (excludeSeeds[i]) output[i] = 0;
-  }
-  return output;
-}
-
-function runGuidedSegmentation() {
-  if (!sourcePixels || !roiMask || !roiMask.some(Boolean)) return;
-
-  const foregroundSamples = collectForegroundSamples();
-  let backgroundSamples = collectBoundaryBackgroundSamples();
-  backgroundSamples = backgroundSamples.concat(collectExcludeSamples());
-
-  if (!foregroundSamples.length || !backgroundSamples.length) {
-    selection.set(roiMask);
-    for (let i = 0; i < selection.length; i += 1) {
-      if (includeSeeds[i]) selection[i] = 1;
-      if (excludeSeeds[i]) selection[i] = 0;
-    }
-    updateSelectionReadout();
-    renderAll();
-    return;
-  }
-
-  const strength = Number(segmentationStrengthInput.value) / 100;
-  const result = new Uint8Array(selection.length);
-
-  for (let i = 0; i < result.length; i += 1) {
-    if (!roiMask[i]) continue;
-    if (includeSeeds[i]) {
-      result[i] = 1;
-      continue;
-    }
-    if (excludeSeeds[i]) {
-      result[i] = 0;
-      continue;
-    }
-
-    const color = colorAt(i);
-    if (color[3] < 16) continue;
-    const fgDistance = nearestColorDistance(color, foregroundSamples);
-    const bgDistance = nearestColorDistance(color, backgroundSamples);
-    const bias = 0.82 + strength * 0.52;
-    result[i] = fgDistance <= bgDistance * bias ? 1 : 0;
-  }
-
-  let smoothed = smoothSelectionOnce(result);
-  smoothed = smoothSelectionOnce(smoothed);
-  selection = keepLargestSeededComponents(smoothed);
+function applyRegion(indices, mode) {
+  if (mode === 'smart') selection.fill(0);
+  for (const index of indices) selection[index] = mode === 'subtract' ? 0 : 1;
   pivot = null;
   pivotReadout.textContent = 'Not set';
   updateSelectionReadout();
   renderAll();
-}
-
-function paintBrushPoint(point, target) {
-  if (!roiMask || !roiMask.some(Boolean)) return;
-  const width = sourceCanvas.width;
-  const height = sourceCanvas.height;
-  const radius = Number(brushSizeInput.value);
-
-  for (let oy = -radius; oy <= radius; oy += 1) {
-    for (let ox = -radius; ox <= radius; ox += 1) {
-      if (ox * ox + oy * oy > radius * radius) continue;
-      const x = point.x + ox;
-      const y = point.y + oy;
-      if (x < 0 || y < 0 || x >= width || y >= height) continue;
-      const index = y * width + x;
-      if (!roiMask[index]) continue;
-      if (target === 'include') {
-        includeSeeds[index] = 1;
-        excludeSeeds[index] = 0;
-      } else {
-        excludeSeeds[index] = 1;
-        includeSeeds[index] = 0;
-      }
-    }
-  }
-}
-
-function paintBrushLine(from, to, target) {
-  const distance = Math.max(1, Math.hypot(to.x - from.x, to.y - from.y));
-  const steps = Math.ceil(distance * 2);
-  for (let i = 0; i <= steps; i += 1) {
-    const t = i / steps;
-    paintBrushPoint({
-      x: Math.round(from.x + (to.x - from.x) * t),
-      y: Math.round(from.y + (to.y - from.y) * t)
-    }, target);
-  }
+  setStatus(`${mode === 'subtract' ? 'Removed' : mode === 'add' ? 'Added' : 'Selected'} ${indices.length} connected pixels.`, 'success');
 }
 
 function buildMask() {
   maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
   if (!selection || !selectedCount()) return;
   const image = maskCtx.createImageData(maskCanvas.width, maskCanvas.height);
-  for (let i = 0; i < selection.length; i += 1) {
+  for (let i = 0; i < selection.length; i++) {
     if (!selection[i]) continue;
-    const pixel = i * 4;
-    image.data[pixel] = 255;
-    image.data[pixel + 1] = 255;
-    image.data[pixel + 2] = 255;
-    image.data[pixel + 3] = 255;
+    const p = i * 4;
+    image.data[p] = image.data[p + 1] = image.data[p + 2] = image.data[p + 3] = 255;
   }
   maskCtx.putImageData(image, 0, 0);
 }
@@ -538,76 +239,26 @@ function buildPart() {
 function renderSource() {
   sourceCtx.clearRect(0, 0, sourceCanvas.width, sourceCanvas.height);
   if (!loadedImage) return;
-
-  if (selectedCount()) {
+  sourceCtx.drawImage(originalCanvas, 0, 0);
+  if (selection && selectedCount()) {
     sourceCtx.save();
-    sourceCtx.globalAlpha = 0.48;
-    sourceCtx.drawImage(originalCanvas, 0, 0);
-    sourceCtx.restore();
-    sourceCtx.save();
-    sourceCtx.globalAlpha = 1;
-    buildPart();
-    sourceCtx.drawImage(partCanvas, 0, 0);
-    sourceCtx.restore();
-
-    sourceCtx.save();
-    sourceCtx.globalAlpha = 0.30;
+    sourceCtx.globalAlpha = 0.32;
     sourceCtx.fillStyle = '#2997ff';
-    for (let y = 0; y < sourceCanvas.height; y += 1) {
-      for (let x = 0; x < sourceCanvas.width; x += 1) {
-        if (selection[y * sourceCanvas.width + x]) sourceCtx.fillRect(x, y, 1, 1);
-      }
-    }
-    sourceCtx.restore();
-  } else {
-    sourceCtx.drawImage(originalCanvas, 0, 0);
-  }
-
-  if (roughLasso.length > 1) {
-    sourceCtx.save();
-    sourceCtx.strokeStyle = '#2997ff';
-    sourceCtx.lineWidth = Math.max(1, 1 / zoom);
-    sourceCtx.setLineDash([Math.max(2, 3 / zoom), Math.max(2, 2 / zoom)]);
-    sourceCtx.beginPath();
-    sourceCtx.moveTo(roughLasso[0].x + 0.5, roughLasso[0].y + 0.5);
-    for (let i = 1; i < roughLasso.length; i += 1) sourceCtx.lineTo(roughLasso[i].x + 0.5, roughLasso[i].y + 0.5);
-    if (!drawing) sourceCtx.closePath();
-    sourceCtx.stroke();
-    sourceCtx.restore();
-  }
-
-  if (includeSeeds) {
-    sourceCtx.save();
-    sourceCtx.globalAlpha = 0.78;
-    for (let y = 0; y < sourceCanvas.height; y += 1) {
-      for (let x = 0; x < sourceCanvas.width; x += 1) {
-        const index = y * sourceCanvas.width + x;
-        if (includeSeeds[index]) {
-          sourceCtx.fillStyle = '#34c759';
-          sourceCtx.fillRect(x, y, 1, 1);
-        } else if (excludeSeeds[index]) {
-          sourceCtx.fillStyle = '#ff3b30';
-          sourceCtx.fillRect(x, y, 1, 1);
-        }
-      }
+    for (let y = 0; y < sourceCanvas.height; y++) for (let x = 0; x < sourceCanvas.width; x++) {
+      if (selection[y * sourceCanvas.width + x]) sourceCtx.fillRect(x, y, 1, 1);
     }
     sourceCtx.restore();
   }
-
+  if (drawingLasso && lasso.length > 1) {
+    sourceCtx.save(); sourceCtx.strokeStyle = '#2997ff'; sourceCtx.lineWidth = Math.max(1, 1 / zoom);
+    sourceCtx.beginPath(); sourceCtx.moveTo(lasso[0].x, lasso[0].y);
+    for (let i = 1; i < lasso.length; i++) sourceCtx.lineTo(lasso[i].x, lasso[i].y);
+    sourceCtx.stroke(); sourceCtx.restore();
+  }
   if (pivot) {
-    sourceCtx.save();
-    sourceCtx.strokeStyle = sourceCtx.fillStyle = '#ff3b30';
-    const r = Math.max(2, 3 / zoom);
-    sourceCtx.beginPath();
-    sourceCtx.arc(pivot.x, pivot.y, r, 0, Math.PI * 2);
-    sourceCtx.fill();
-    sourceCtx.beginPath();
-    sourceCtx.moveTo(pivot.x - r * 2, pivot.y);
-    sourceCtx.lineTo(pivot.x + r * 2, pivot.y);
-    sourceCtx.moveTo(pivot.x, pivot.y - r * 2);
-    sourceCtx.lineTo(pivot.x, pivot.y + r * 2);
-    sourceCtx.stroke();
-    sourceCtx.restore();
+    sourceCtx.save(); sourceCtx.strokeStyle = sourceCtx.fillStyle = '#ff3b30';
+    const r = Math.max(2, 3 / zoom); sourceCtx.beginPath(); sourceCtx.arc(pivot.x, pivot.y, r, 0, Math.PI * 2); sourceCtx.fill();
+    sourceCtx.beginPath(); sourceCtx.moveTo(pivot.x-r*2,pivot.y); sourceCtx.lineTo(pivot.x+r*2,pivot.y); sourceCtx.moveTo(pivot.x,pivot.y-r*2); sourceCtx.lineTo(pivot.x,pivot.y+r*2); sourceCtx.stroke(); sourceCtx.restore();
   }
 }
 
@@ -616,183 +267,69 @@ function renderOutput() {
   if (!loadedImage) return;
   outputCtx.drawImage(originalCanvas, 0, 0);
   if (!selection || !selectedCount()) return;
-
-  buildPart();
-  buildMask();
-  outputCtx.save();
-  outputCtx.globalCompositeOperation = 'destination-out';
-  outputCtx.drawImage(maskCanvas, 0, 0);
-  outputCtx.restore();
-
+  buildPart(); buildMask();
+  outputCtx.save(); outputCtx.globalCompositeOperation = 'destination-out'; outputCtx.drawImage(maskCanvas, 0, 0); outputCtx.restore();
   const bounds = selectionBounds();
   const activePivot = pivot || { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
   const angle = Number(rotationInput.value || 0) * Math.PI / 180;
-  const dx = Number(translateXInput.value || 0);
-  const dy = Number(translateYInput.value || 0);
-
-  outputCtx.save();
-  outputCtx.translate(activePivot.x + dx, activePivot.y + dy);
-  outputCtx.rotate(angle);
-  outputCtx.translate(-activePivot.x, -activePivot.y);
-  outputCtx.drawImage(partCanvas, 0, 0);
-  outputCtx.restore();
+  const dx = Number(translateXInput.value || 0), dy = Number(translateYInput.value || 0);
+  outputCtx.save(); outputCtx.translate(activePivot.x + dx, activePivot.y + dy); outputCtx.rotate(angle); outputCtx.translate(-activePivot.x, -activePivot.y); outputCtx.drawImage(partCanvas, 0, 0); outputCtx.restore();
 }
 
-function renderAll() {
-  renderSource();
-  renderOutput();
+function renderAll() { renderSource(); renderOutput(); }
+
+function lassoToSelection() {
+  if (lasso.length < 3) return false;
+  const temp = document.createElement('canvas'); temp.width = sourceCanvas.width; temp.height = sourceCanvas.height;
+  const ctx = temp.getContext('2d', { willReadFrequently: true }); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(lasso[0].x, lasso[0].y);
+  for (let i = 1; i < lasso.length; i++) ctx.lineTo(lasso[i].x, lasso[i].y); ctx.closePath(); ctx.fill();
+  const data = ctx.getImageData(0, 0, temp.width, temp.height).data; selection.fill(0);
+  for (let i = 0; i < selection.length; i++) if (data[i * 4 + 3]) selection[i] = 1;
+  return true;
 }
 
 sourceCanvas.addEventListener('pointerdown', event => {
   if (!loadedImage) return;
   const point = canvasPoint(event);
-
-  if (tool === 'rough') {
-    sourceCanvas.setPointerCapture(event.pointerId);
-    drawing = true;
-    roughLasso = [point];
-    pivot = null;
-    includeSeeds.fill(0);
-    excludeSeeds.fill(0);
-    selection.fill(0);
-    renderSource();
-    return;
-  }
-
-  if (tool === 'include' || tool === 'exclude') {
-    if (!roiMask.some(Boolean)) {
-      setStatus('Draw a Rough Lasso first.', 'error');
-      return;
-    }
-    sourceCanvas.setPointerCapture(event.pointerId);
-    drawing = true;
-    lastBrushPoint = point;
-    paintBrushPoint(point, tool);
-    renderSource();
-    return;
-  }
-
-  if (tool === 'pivot' && selectedCount()) {
-    pivot = point;
-    pivotReadout.textContent = `(${point.x}, ${point.y})`;
-    updateSelectionReadout();
-    selectionSummary.textContent = 'Pivot set. Adjust rotation or translation.';
-    setStatus('Pivot set. Motion controls are ready.', 'success');
-    renderAll();
+  if (['smart','add','subtract'].includes(tool)) {
+    const region = floodRegion(point.x, point.y);
+    if (!region.length) return setStatus('No opaque connected region was found there.', 'error');
+    applyRegion(region, tool);
+  } else if (tool === 'lasso') {
+    sourceCanvas.setPointerCapture(event.pointerId); drawingLasso = true; lasso = [point]; renderSource();
+  } else if (tool === 'pivot' && selectedCount()) {
+    pivot = point; pivotReadout.textContent = `(${point.x}, ${point.y})`; updateSelectionReadout(); selectionSummary.textContent = 'Pivot set. Adjust rotation or translation.'; setStatus('Pivot set. Motion controls are ready.', 'success'); renderAll();
   }
 });
 
 sourceCanvas.addEventListener('pointermove', event => {
-  if (!drawing) return;
-  const point = canvasPoint(event);
-
-  if (tool === 'rough') {
-    const last = roughLasso[roughLasso.length - 1];
-    if (!last || Math.hypot(point.x - last.x, point.y - last.y) >= 0.5) {
-      roughLasso.push(point);
-      renderSource();
-    }
-    return;
-  }
-
-  if ((tool === 'include' || tool === 'exclude') && lastBrushPoint) {
-    paintBrushLine(lastBrushPoint, point, tool);
-    lastBrushPoint = point;
-    renderSource();
-  }
+  if (!drawingLasso || tool !== 'lasso') return;
+  const p = canvasPoint(event), last = lasso[lasso.length - 1];
+  if (!last || Math.hypot(p.x-last.x,p.y-last.y) >= 0.5) { lasso.push(p); renderSource(); }
 });
 
 sourceCanvas.addEventListener('pointerup', event => {
-  if (!drawing) return;
-  drawing = false;
-  if (sourceCanvas.hasPointerCapture(event.pointerId)) sourceCanvas.releasePointerCapture(event.pointerId);
-
-  if (tool === 'rough') {
-    if (!rasterizeRoughLasso()) {
-      roughLasso = [];
-      setStatus('The rough lasso was too small.', 'error');
-      renderAll();
-      return;
-    }
-    runGuidedSegmentation();
-    setStatus('Proposed part mask created. Paint Include or Exclude only where it needs correction.', 'success');
-    setTool('include');
-    return;
-  }
-
-  if (tool === 'include' || tool === 'exclude') {
-    lastBrushPoint = null;
-    runGuidedSegmentation();
-    setStatus(`${tool === 'include' ? 'Include' : 'Exclude'} guidance applied and mask recalculated.`, 'success');
-  }
+  if (!drawingLasso || tool !== 'lasso') return;
+  drawingLasso = false; if (sourceCanvas.hasPointerCapture(event.pointerId)) sourceCanvas.releasePointerCapture(event.pointerId);
+  if (!lassoToSelection()) return setStatus('The lasso was too small.', 'error');
+  pivot = null; pivotReadout.textContent = 'Not set'; updateSelectionReadout(); renderAll(); setStatus('Lasso selection created. Set the pivot next.', 'success');
 });
 
 [sourceFrame, outputFrame].forEach(frame => {
-  frame.addEventListener('dragover', event => {
-    event.preventDefault();
-    frame.classList.add('dragging');
-  });
+  frame.addEventListener('dragover', e => { e.preventDefault(); frame.classList.add('dragging'); });
   frame.addEventListener('dragleave', () => frame.classList.remove('dragging'));
-  frame.addEventListener('drop', event => {
-    event.preventDefault();
-    frame.classList.remove('dragging');
-    loadFile(event.dataTransfer.files[0]);
-  });
+  frame.addEventListener('drop', e => { e.preventDefault(); frame.classList.remove('dragging'); loadFile(e.dataTransfer.files[0]); });
 });
-
-sourceFrame.addEventListener('click', event => {
-  if (!loadedImage && event.target !== sourceCanvas) fileInput.click();
-});
+sourceFrame.addEventListener('click', e => { if (!loadedImage && e.target !== sourceCanvas) fileInput.click(); });
 changeImageButton.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => loadFile(fileInput.files[0]));
-
-document.querySelectorAll('.tool-button').forEach(button => {
-  button.addEventListener('click', () => setTool(button.dataset.tool));
-});
-
-clearSelectionButton.addEventListener('click', () => {
-  resetMotion();
-  setTool('rough');
-  setStatus('Selection cleared. Draw a new Rough Lasso around a moving part.');
-});
-
-segmentationStrengthInput.addEventListener('input', () => {
-  segmentationReadout.textContent = `${segmentationStrengthInput.value}. Higher values prefer stronger color separation from the pixels surrounding the rough lasso.`;
-  if (roiMask && roiMask.some(Boolean)) {
-    runGuidedSegmentation();
-    setStatus('Segmentation strength updated.', 'success');
-  }
-});
-
-brushSizeInput.addEventListener('input', () => {
-  brushReadout.textContent = `${brushSizeInput.value} px. Include and Exclude strokes become hard guidance for the next mask calculation.`;
-});
-
-[rotationInput, translateXInput, translateYInput].forEach(input => {
-  input.addEventListener('input', () => {
-    renderOutput();
-    setStatus('Candidate frame updated.', 'success');
-  });
-});
-
-zoomOutButton.addEventListener('click', () => {
-  zoom = Math.max(0.25, zoom / 2);
-  applyZoom();
-  renderAll();
-});
-zoomInButton.addEventListener('click', () => {
-  zoom = Math.min(64, zoom * 2);
-  applyZoom();
-  renderAll();
-});
-
+document.querySelectorAll('.tool-button').forEach(button => button.addEventListener('click', () => setTool(button.dataset.tool)));
+clearSelectionButton.addEventListener('click', () => { resetMotion(); setTool('smart'); setStatus('Selection cleared. Smart Click a new part.'); });
+[rotationInput, translateXInput, translateYInput].forEach(input => input.addEventListener('input', () => { renderOutput(); setStatus('Candidate frame updated.', 'success'); }));
+toleranceInput.addEventListener('input', () => { toleranceReadout.textContent = `${toleranceInput.value}. Lower values stay closer to the clicked color. Higher values cross more shading variation.`; });
+zoomOutButton.addEventListener('click', () => { zoom = Math.max(0.25, zoom / 2); applyZoom(); renderAll(); });
+zoomInButton.addEventListener('click', () => { zoom = Math.min(64, zoom * 2); applyZoom(); renderAll(); });
 exportButton.addEventListener('click', () => {
   if (!loadedImage || !pivot || !selectedCount()) return;
-  renderOutput();
-  const link = document.createElement('a');
-  const base = fileName.replace(/\.[^.]+$/, '') || 'frame';
-  link.download = `${base}-motion-frame.png`;
-  link.href = outputCanvas.toDataURL('image/png');
-  link.click();
-  setStatus(`Exported ${link.download}.`, 'success');
+  renderOutput(); const link = document.createElement('a'); const base = fileName.replace(/\.[^.]+$/, '') || 'frame'; link.download = `${base}-motion-frame.png`; link.href = outputCanvas.toDataURL('image/png'); link.click(); setStatus(`Exported ${link.download}.`, 'success');
 });
