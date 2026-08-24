@@ -54,24 +54,33 @@ function setStatus(message, kind = '') {
 function setMotionControlsEnabled(enabled) {
   motionType.disabled = !enabled;
   exportButton.disabled = !enabled;
-  const screen = motionType.value === 'screen';
-  rotationInput.disabled = !enabled || !screen;
-  translateXInput.disabled = !enabled || !screen;
-  translateYInput.disabled = !enabled || !screen;
-  depthAngleInput.disabled = !enabled || screen;
-  depthAngleNumber.disabled = !enabled || screen;
-  perspectiveInput.disabled = !enabled || screen;
+  const depth = motionType.value === 'depth';
+
+  // Left/right rotation is intentionally available in both modes.
+  rotationInput.disabled = !enabled;
+
+  // Translation remains screen-only so a depth flip keeps its hinge anchored.
+  translateXInput.disabled = !enabled || depth;
+  translateYInput.disabled = !enabled || depth;
+
+  depthAngleInput.disabled = !enabled || !depth;
+  depthAngleNumber.disabled = !enabled || !depth;
+  perspectiveInput.disabled = !enabled || !depth;
 }
 
 function updateMotionTypeUI() {
   const depth = motionType.value === 'depth';
-  screenRotationControl.hidden = depth;
+
+  // Rotation stays visible in both modes so depth and left/right motion can be combined.
+  screenRotationControl.hidden = false;
   translationControl.hidden = depth;
   depthAngleControl.hidden = !depth;
   perspectiveControl.hidden = !depth;
+
   motionTypeNote.textContent = depth
-    ? 'Depth flip keeps the hinge fixed, shortens the projected lever as it points toward the viewer, and enlarges the end that moves closer to the camera.'
+    ? 'Depth flip keeps the hinge fixed while also allowing left/right rotation around that same pivot.'
     : 'Screen rotation preserves the original first-version behavior.';
+
   setMotionControlsEnabled(Boolean(pivot));
   renderOutput();
 }
@@ -269,6 +278,7 @@ function drawScreenTransform(activePivot) {
 function drawDepthFlip(activePivot) {
   const angleDegrees = Number(depthAngleInput.value || 0);
   const radians = angleDegrees * Math.PI / 180;
+  const screenAngle = Number(rotationInput.value || 0) * Math.PI / 180;
   const bounds = boundsFromLasso();
   if (!bounds) return;
 
@@ -322,6 +332,13 @@ function drawDepthFlip(activePivot) {
 
   outputCtx.save();
   outputCtx.imageSmoothingEnabled = false;
+
+  // Apply left/right screen rotation around the same hinge after calculating depth projection.
+  // This lets a lever come toward the camera and also swing left or right in the same frame.
+  outputCtx.translate(activePivot.x, activePivot.y);
+  outputCtx.rotate(screenAngle);
+  outputCtx.translate(-activePivot.x, -activePivot.y);
+
   for (const strip of strips) {
     outputCtx.drawImage(
       partCanvas,
@@ -444,13 +461,23 @@ clearSelectionButton.addEventListener('click', () => {
 
 motionType.addEventListener('change', () => {
   updateMotionTypeUI();
-  setStatus(motionType.value === 'depth' ? 'Depth flip mode selected. Move the slider toward 180° to pull the lever down.' : 'Screen rotation mode selected.', 'success');
+  setStatus(
+    motionType.value === 'depth'
+      ? 'Depth flip mode selected. Combine Depth flip with Left / right rotation as needed.'
+      : 'Screen rotation mode selected.',
+    'success'
+  );
 });
 
 [rotationInput, translateXInput, translateYInput].forEach(input => {
   input.addEventListener('input', () => {
     renderOutput();
-    setStatus('Candidate frame updated.', 'success');
+    setStatus(
+      motionType.value === 'depth'
+        ? `Combined motion updated: ${depthAngleInput.value}° depth, ${rotationInput.value || 0}° left/right.`
+        : 'Candidate frame updated.',
+      'success'
+    );
   });
 });
 
@@ -459,8 +486,7 @@ function setDepthAngle(value) {
   depthAngleInput.value = String(safe);
   depthAngleNumber.value = String(safe);
   renderOutput();
-  setStatus(`Depth flip updated to ${safe}°.
-`, 'success');
+  setStatus(`Combined motion updated: ${safe}° depth, ${rotationInput.value || 0}° left/right.`, 'success');
 }
 
 depthAngleInput.addEventListener('input', () => setDepthAngle(depthAngleInput.value));
@@ -468,7 +494,7 @@ depthAngleNumber.addEventListener('input', () => setDepthAngle(depthAngleNumber.
 perspectiveInput.addEventListener('input', () => {
   perspectiveReadout.textContent = `${perspectiveInput.value}% depth perspective. Pixels farther from the hinge grow more as they approach the viewer.`;
   renderOutput();
-  setStatus('Perspective strength updated.', 'success');
+  setStatus('Depth perspective updated.', 'success');
 });
 
 zoomOutButton.addEventListener('click', () => {
@@ -487,7 +513,9 @@ exportButton.addEventListener('click', () => {
   renderOutput();
   const link = document.createElement('a');
   const base = fileName.replace(/\.[^.]+$/, '') || 'frame';
-  const suffix = motionType.value === 'depth' ? `depth-${depthAngleInput.value}` : 'motion';
+  const suffix = motionType.value === 'depth'
+    ? `depth-${depthAngleInput.value}-rotate-${rotationInput.value || 0}`
+    : 'motion';
   link.download = `${base}-${suffix}-frame.png`;
   link.href = outputCanvas.toDataURL('image/png');
   link.click();
