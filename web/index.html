@@ -29,10 +29,9 @@
           <div class="source-footer">
             <div id="toolBar" class="object-toolbar" hidden>
               <div class="tool-group" role="group" aria-label="Selection and motion tools">
-                <button class="tool-button active" type="button" data-tool="smart">Smart Click</button>
-                <button class="tool-button" type="button" data-tool="add">Add Region</button>
-                <button class="tool-button" type="button" data-tool="subtract">Subtract</button>
-                <button class="tool-button" type="button" data-tool="lasso">Lasso</button>
+                <button class="tool-button active" type="button" data-tool="rough">Rough Lasso</button>
+                <button class="tool-button" type="button" data-tool="include">Include Brush</button>
+                <button class="tool-button" type="button" data-tool="exclude">Exclude Brush</button>
                 <button class="tool-button" type="button" data-tool="pivot">Set Pivot</button>
                 <button class="tool-button" type="button" data-tool="pan">Pan</button>
               </div>
@@ -55,10 +54,10 @@
           <div id="outputFrame" class="compare-frame" tabindex="0">
             <div class="compare-stage">
               <canvas id="outputCanvas"></canvas>
-              <div class="preview-empty">Choose an image, select a rigid part, then define its pivot and motion.</div>
+              <div class="preview-empty">Choose an image, isolate a rigid part, then define its pivot and motion.</div>
             </div>
           </div>
-          <div class="preview-state">Smart Click grows a connected pixel region from the point you choose. Add or subtract regions until the moving part is clean, then set its pivot.</div>
+          <div class="preview-state">Draw one rough lasso around the whole moving part. The workbench proposes a unified mask using foreground/background color evidence and pixel boundaries. Paint Include or Exclude only where the proposal needs correction.</div>
         </section>
       </div>
 
@@ -69,7 +68,7 @@
             <div class="info-grid">
               <div>
                 <label>Current workflow</label>
-                <p class="field-note info-copy">1. Load a pixel-ready sprite. 2. Smart Click one enclosed or connected piece. 3. Use Add Region or Subtract to refine the moving part, or fall back to Lasso. 4. Set the pivot. 5. Adjust rotation or translation and export.</p>
+                <p class="field-note info-copy">1. Load a pixel-ready sprite. 2. Draw one loose Rough Lasso around the complete moving part. 3. Inspect the blue proposed mask. 4. Paint Include over missing pixels or Exclude over unwanted pixels. 5. Set the pivot, rotate or translate, and export.</p>
               </div>
               <div class="selection-status">
                 <span class="selection-status-dot"></span>
@@ -82,9 +81,15 @@
           </div>
 
           <div class="control full-width">
-            <div class="label-row"><label for="tolerance">Smart Click color tolerance</label><span class="hint">0-100</span></div>
-            <input id="tolerance" type="range" min="0" max="100" step="1" value="18">
-            <p id="toleranceReadout" class="field-note">18. Lower values stay closer to the clicked color. Higher values cross more shading variation.</p>
+            <div class="label-row"><label for="segmentationStrength">Segmentation strength</label><span class="hint">0-100</span></div>
+            <input id="segmentationStrength" type="range" min="0" max="100" step="1" value="58">
+            <p id="segmentationReadout" class="field-note">58. Higher values prefer stronger color separation from the pixels surrounding the rough lasso.</p>
+          </div>
+
+          <div class="control full-width">
+            <div class="label-row"><label for="brushSize">Refinement brush size</label><span class="hint">pixels</span></div>
+            <input id="brushSize" type="range" min="1" max="8" step="1" value="2">
+            <p id="brushReadout" class="field-note">2 px. Include and Exclude strokes become hard guidance for the next mask calculation.</p>
           </div>
 
           <div class="control">
@@ -121,7 +126,7 @@
       </div>
     </section>
 
-    <p class="privacy">Runs locally in your browser on this Mac. Smart part selection and rigid transforms are deterministic and do not send images to an AI service.</p>
+    <p class="privacy">Runs locally in your browser on this Mac. Guided part segmentation and rigid transforms are deterministic and do not send images to an AI service.</p>
   </main>
   <script src="/app.js"></script>
 </body>
