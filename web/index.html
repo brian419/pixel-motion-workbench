@@ -110,13 +110,13 @@
               <input id="depthAngleNumber" type="number" min="0" max="180" step="1" value="0" disabled>
               <span class="hint">degrees</span>
             </div>
-            <p class="field-note">The pivot stays fixed while the selected part is vertically foreshortened, crosses the camera-facing midpoint, and flips below the hinge.</p>
+            <p class="field-note">The hinge stays fixed. As the lever comes toward the viewer, its screen length shortens while pixels farther from the hinge grow to create a perspective cue. Past 90°, the lever continues below the hinge.</p>
           </div>
 
           <div id="perspectiveControl" class="control" hidden>
-            <div class="label-row"><label for="perspective">Perspective strength</label><span class="hint">0-100%</span></div>
-            <input id="perspective" type="range" min="0" max="100" step="1" value="20" disabled>
-            <p id="perspectiveReadout" class="field-note">20% width emphasis near the camera-facing midpoint.</p>
+            <div class="label-row"><label for="perspective">Depth perspective</label><span class="hint">0-100%</span></div>
+            <input id="perspective" type="range" min="0" max="100" step="1" value="55" disabled>
+            <p id="perspectiveReadout" class="field-note">55% depth perspective. Pixels farther from the hinge grow more as they approach the viewer.</p>
           </div>
 
           <div class="control">
