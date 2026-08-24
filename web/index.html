@@ -55,7 +55,7 @@
               <div class="preview-empty">Choose an image, select a rigid part, then define its pivot and motion.</div>
             </div>
           </div>
-          <div id="previewState" class="preview-state">Depth mode now adds deterministic thickness, a synthesized front-facing tip surface, and local revealed-pixel repair behind the moving part.</div>
+          <div id="previewState" class="preview-state">Rigid motion keeps the selected part anchored to its pivot. Newly exposed pixels are intentionally left transparent for now.</div>
         </section>
       </div>
 
@@ -137,9 +137,8 @@
       </div>
     </section>
 
-    <p class="privacy">Runs locally in your browser on this Mac. Rigid transforms, depth surface synthesis, and revealed-pixel repair are deterministic and do not send images to an AI service.</p>
+    <p class="privacy">Runs locally in your browser on this Mac. Rigid transforms are deterministic and do not send images to an AI service.</p>
   </main>
   <script src="/app.js"></script>
-  <script src="/depth-enhancements.js"></script>
 </body>
 </html>
