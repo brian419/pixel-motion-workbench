@@ -13,13 +13,22 @@ const selectionSummary = document.getElementById('selectionSummary');
 const selectionReadout = document.getElementById('selectionReadout');
 const pivotReadout = document.getElementById('pivotReadout');
 const rotationInput = document.getElementById('rotation');
+const rotationSlider = document.getElementById('rotationSlider');
 const translateXInput = document.getElementById('translateX');
+const translateXSlider = document.getElementById('translateXSlider');
 const translateYInput = document.getElementById('translateY');
+const translateYSlider = document.getElementById('translateYSlider');
 const exportButton = document.getElementById('exportButton');
+const folderButton = document.getElementById('folderButton');
+const folderPath = document.getElementById('folderPath');
+const outputName = document.getElementById('outputName');
 const status = document.getElementById('status');
 const zoomOutButton = document.getElementById('zoomOutButton');
 const zoomInButton = document.getElementById('zoomInButton');
 const zoomValue = document.getElementById('zoomValue');
+const sourceZoomOutButton = document.getElementById('sourceZoomOutButton');
+const sourceZoomInButton = document.getElementById('sourceZoomInButton');
+const sourceZoomValue = document.getElementById('sourceZoomValue');
 
 const originalCanvas = document.createElement('canvas');
 const originalCtx = originalCanvas.getContext('2d');
@@ -34,24 +43,52 @@ let tool = 'select';
 let lasso = [];
 let drawingLasso = false;
 let pivot = null;
-let zoom = 1;
+let sourceZoom = 1;
+let outputZoom = 1;
+let outputFolderChosen = false;
+
+const motionControls = [
+  rotationInput,
+  rotationSlider,
+  translateXInput,
+  translateXSlider,
+  translateYInput,
+  translateYSlider,
+];
 
 function setStatus(message, kind = '') {
   status.textContent = message;
   status.className = `status ${kind}`.trim();
 }
 
+function updateExportAvailability() {
+  exportButton.disabled = !(loadedImage && pivot && lasso.length >= 3 && outputFolderChosen);
+}
+
+function setMotionEnabled(enabled) {
+  motionControls.forEach(el => { el.disabled = !enabled; });
+  updateExportAvailability();
+}
+
+function setMotionValue(numberInput, sliderInput, value) {
+  const numeric = Number(value) || 0;
+  numberInput.value = String(numeric);
+  const sliderMin = Number(sliderInput.min);
+  const sliderMax = Number(sliderInput.max);
+  sliderInput.value = String(Math.max(sliderMin, Math.min(sliderMax, numeric)));
+}
+
 function resetMotion() {
   lasso = [];
   pivot = null;
   drawingLasso = false;
-  rotationInput.value = '0';
-  translateXInput.value = '0';
-  translateYInput.value = '0';
-  [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = true; });
+  setMotionValue(rotationInput, rotationSlider, 0);
+  setMotionValue(translateXInput, translateXSlider, 0);
+  setMotionValue(translateYInput, translateYSlider, 0);
+  setMotionEnabled(false);
   selectionReadout.textContent = 'Not selected';
   pivotReadout.textContent = 'Not set';
-  selectionSummary.textContent = loadedImage ? 'Draw a lasso around the rigid part you want to move.' : 'No image loaded yet.';
+  selectionSummary.textContent = loadedImage ? 'Zoom in if needed, then draw a lasso around the rigid part you want to move.' : 'No image loaded yet.';
   renderAll();
 }
 
@@ -63,15 +100,19 @@ function chooseDefaultZoom(width, height) {
   return 1;
 }
 
-function applyZoom() {
+function applySourceZoom() {
   if (!loadedImage) return;
-  const width = Math.max(1, Math.round(sourceCanvas.width * zoom));
-  const height = Math.max(1, Math.round(sourceCanvas.height * zoom));
-  [sourceCanvas, outputCanvas].forEach(canvas => {
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-  });
-  zoomValue.textContent = `${Math.round(zoom * 100)}%`;
+  sourceCanvas.style.width = `${Math.max(1, Math.round(sourceCanvas.width * sourceZoom))}px`;
+  sourceCanvas.style.height = `${Math.max(1, Math.round(sourceCanvas.height * sourceZoom))}px`;
+  sourceZoomValue.textContent = `${Math.round(sourceZoom * 100)}%`;
+  renderSource();
+}
+
+function applyOutputZoom() {
+  if (!loadedImage) return;
+  outputCanvas.style.width = `${Math.max(1, Math.round(outputCanvas.width * outputZoom))}px`;
+  outputCanvas.style.height = `${Math.max(1, Math.round(outputCanvas.height * outputZoom))}px`;
+  zoomValue.textContent = `${Math.round(outputZoom * 100)}%`;
 }
 
 function configureCanvases(width, height) {
@@ -79,11 +120,14 @@ function configureCanvases(width, height) {
     canvas.width = width;
     canvas.height = height;
   });
-  sourceCtx.imageSmoothingEnabled = false;
-  outputCtx.imageSmoothingEnabled = false;
-  originalCtx.imageSmoothingEnabled = false;
-  maskCtx.imageSmoothingEnabled = false;
-  partCtx.imageSmoothingEnabled = false;
+  [sourceCtx, outputCtx, originalCtx, maskCtx, partCtx].forEach(ctx => {
+    ctx.imageSmoothingEnabled = false;
+  });
+}
+
+function defaultOutputName(name) {
+  const base = name.replace(/\.[^.]+$/, '') || 'frame';
+  return `${base}-motion-frame.png`;
 }
 
 function loadFile(file) {
@@ -100,14 +144,17 @@ function loadFile(file) {
     outputFrame.classList.add('has-image');
     changeImageButton.hidden = false;
     toolBar.hidden = false;
-    zoom = chooseDefaultZoom(image.naturalWidth, image.naturalHeight);
-    zoomOutButton.disabled = false;
-    zoomInButton.disabled = false;
+    const initialZoom = chooseDefaultZoom(image.naturalWidth, image.naturalHeight);
+    sourceZoom = initialZoom;
+    outputZoom = initialZoom;
+    [zoomOutButton, zoomInButton, sourceZoomOutButton, sourceZoomInButton].forEach(button => { button.disabled = false; });
     fileMeta.textContent = `${file.name} · ${image.naturalWidth} × ${image.naturalHeight}px`;
+    outputName.value = defaultOutputName(file.name);
     resetMotion();
-    applyZoom();
+    applySourceZoom();
+    applyOutputZoom();
     setTool('select');
-    setStatus('Image loaded. Draw a lasso around one rigid part.', 'success');
+    setStatus(outputFolderChosen ? 'Image loaded. Zoom if needed, then select a rigid part.' : 'Image loaded. Zoom if needed, select a part, and choose an output folder.', 'success');
     URL.revokeObjectURL(url);
   };
   image.onerror = () => {
@@ -124,13 +171,13 @@ function setTool(nextTool) {
   });
   if (tool === 'select') {
     sourceCanvas.style.cursor = 'crosshair';
-    selectionSummary.textContent = lasso.length >= 3 ? 'Selection ready. Redraw it at any time, or set the pivot.' : 'Draw a loose lasso around the rigid part you want to move.';
+    selectionSummary.textContent = lasso.length >= 3 ? 'Selection ready. Redraw it at any time, or set the pivot.' : 'Zoom in if needed, then draw a lasso around the rigid part you want to move.';
   } else if (tool === 'pivot') {
     sourceCanvas.style.cursor = 'cell';
     selectionSummary.textContent = 'Click the hinge or attachment point for the selected part.';
   } else {
     sourceCanvas.style.cursor = 'default';
-    selectionSummary.textContent = 'Pan mode is reserved for linked viewport navigation. Use the scrollbars for now.';
+    selectionSummary.textContent = 'Use the scrollbars to navigate while zoomed in, then return to Select Part or Set Pivot.';
   }
 }
 
@@ -184,8 +231,8 @@ function renderSource() {
   if (lasso.length >= 2) {
     sourceCtx.save();
     sourceCtx.strokeStyle = '#2997ff';
-    sourceCtx.lineWidth = Math.max(1, 1 / zoom);
-    sourceCtx.setLineDash([Math.max(2, 3 / zoom), Math.max(2, 2 / zoom)]);
+    sourceCtx.lineWidth = Math.max(1, 1 / sourceZoom);
+    sourceCtx.setLineDash([Math.max(1, 3 / sourceZoom), Math.max(1, 2 / sourceZoom)]);
     sourceCtx.beginPath();
     sourceCtx.moveTo(lasso[0].x, lasso[0].y);
     for (let i = 1; i < lasso.length; i += 1) sourceCtx.lineTo(lasso[i].x, lasso[i].y);
@@ -197,8 +244,8 @@ function renderSource() {
     sourceCtx.save();
     sourceCtx.strokeStyle = '#ff3b30';
     sourceCtx.fillStyle = '#ff3b30';
-    sourceCtx.lineWidth = Math.max(1, 1 / zoom);
-    const r = Math.max(2, 3 / zoom);
+    sourceCtx.lineWidth = Math.max(1, 1 / sourceZoom);
+    const r = Math.max(1.25, 3 / sourceZoom);
     sourceCtx.beginPath();
     sourceCtx.arc(pivot.x, pivot.y, r, 0, Math.PI * 2);
     sourceCtx.fill();
@@ -254,13 +301,14 @@ sourceCanvas.addEventListener('pointerdown', event => {
     drawingLasso = true;
     lasso = [canvasPoint(event)];
     pivot = null;
+    setMotionEnabled(false);
     renderAll();
   } else if (tool === 'pivot' && lasso.length >= 3) {
     pivot = canvasPoint(event);
     pivotReadout.textContent = `(${Math.round(pivot.x)}, ${Math.round(pivot.y)})`;
-    [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = false; });
-    selectionSummary.textContent = 'Pivot set. Adjust rotation or translation to build the candidate frame.';
-    setStatus('Pivot set. Motion controls are ready.', 'success');
+    setMotionEnabled(true);
+    selectionSummary.textContent = 'Pivot set. Adjust rotation or translation with the sliders or exact values.';
+    setStatus(outputFolderChosen ? 'Pivot set. Motion controls and export are ready.' : 'Pivot set. Choose an output folder before exporting.', 'success');
     renderAll();
   }
 });
@@ -269,7 +317,8 @@ sourceCanvas.addEventListener('pointermove', event => {
   if (!drawingLasso || tool !== 'select') return;
   const point = canvasPoint(event);
   const last = lasso[lasso.length - 1];
-  if (!last || Math.hypot(point.x - last.x, point.y - last.y) >= 0.5) {
+  const minimumDistance = Math.max(0.08, 0.5 / sourceZoom);
+  if (!last || Math.hypot(point.x - last.x, point.y - last.y) >= minimumDistance) {
     lasso.push(point);
     renderSource();
   }
@@ -286,7 +335,7 @@ sourceCanvas.addEventListener('pointerup', event => {
     const bounds = boundsFromLasso();
     selectionReadout.textContent = `${bounds.width} × ${bounds.height}px region near (${bounds.x}, ${bounds.y})`;
     pivotReadout.textContent = 'Not set';
-    [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = true; });
+    setMotionEnabled(false);
     selectionSummary.textContent = 'Selection ready. Click Set Pivot, then click its hinge or attachment point.';
     setStatus('Part selected. Set its pivot next.', 'success');
   }
@@ -316,34 +365,86 @@ document.querySelectorAll('.tool-button').forEach(button => {
 clearSelectionButton.addEventListener('click', () => {
   resetMotion();
   setTool('select');
-  setStatus('Selection cleared. Draw a new lasso around a rigid part.');
+  setStatus('Selection cleared. Zoom if needed, then draw a new lasso around a rigid part.');
 });
 
-[rotationInput, translateXInput, translateYInput].forEach(input => {
-  input.addEventListener('input', () => {
+function bindMotionPair(numberInput, sliderInput) {
+  sliderInput.addEventListener('input', () => {
+    numberInput.value = sliderInput.value;
     renderOutput();
     setStatus('Candidate frame updated.', 'success');
   });
+  numberInput.addEventListener('input', () => {
+    const value = Number(numberInput.value || 0);
+    sliderInput.value = String(Math.max(Number(sliderInput.min), Math.min(Number(sliderInput.max), value)));
+    renderOutput();
+    setStatus('Candidate frame updated.', 'success');
+  });
+}
+
+bindMotionPair(rotationInput, rotationSlider);
+bindMotionPair(translateXInput, translateXSlider);
+bindMotionPair(translateYInput, translateYSlider);
+
+function changeSourceZoom(multiplier) {
+  sourceZoom = Math.max(0.25, Math.min(64, sourceZoom * multiplier));
+  applySourceZoom();
+}
+function changeOutputZoom(multiplier) {
+  outputZoom = Math.max(0.25, Math.min(64, outputZoom * multiplier));
+  applyOutputZoom();
+}
+sourceZoomOutButton.addEventListener('click', () => changeSourceZoom(0.5));
+sourceZoomInButton.addEventListener('click', () => changeSourceZoom(2));
+zoomOutButton.addEventListener('click', () => changeOutputZoom(0.5));
+zoomInButton.addEventListener('click', () => changeOutputZoom(2));
+
+folderButton.addEventListener('click', async () => {
+  folderButton.disabled = true;
+  setStatus('Opening folder chooser...');
+  try {
+    const response = await fetch('/api/choose-folder', { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Could not choose a folder.');
+    if (data.cancelled) {
+      setStatus('Folder selection cancelled.');
+      return;
+    }
+    outputFolderChosen = true;
+    folderPath.textContent = data.path;
+    updateExportAvailability();
+    setStatus('Output folder selected.', 'success');
+  } catch (error) {
+    setStatus(error.message || 'Could not choose an output folder.', 'error');
+  } finally {
+    folderButton.disabled = false;
+  }
 });
 
-zoomOutButton.addEventListener('click', () => {
-  zoom = Math.max(0.25, zoom / 2);
-  applyZoom();
-  renderAll();
-});
-zoomInButton.addEventListener('click', () => {
-  zoom = Math.min(64, zoom * 2);
-  applyZoom();
-  renderAll();
-});
+function canvasToBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not create the PNG frame.')), 'image/png');
+  });
+}
 
-exportButton.addEventListener('click', () => {
-  if (!loadedImage || !pivot || lasso.length < 3) return;
+exportButton.addEventListener('click', async () => {
+  if (!loadedImage || !pivot || lasso.length < 3 || !outputFolderChosen) return;
   renderOutput();
-  const link = document.createElement('a');
-  const base = fileName.replace(/\.[^.]+$/, '') || 'frame';
-  link.download = `${base}-motion-frame.png`;
-  link.href = outputCanvas.toDataURL('image/png');
-  link.click();
-  setStatus(`Exported ${link.download}.`, 'success');
+  exportButton.disabled = true;
+  setStatus('Saving candidate frame...');
+  try {
+    const blob = await canvasToBlob(outputCanvas);
+    const form = new FormData();
+    form.append('frame', blob, 'frame.png');
+    form.append('output_name', outputName.value.trim() || defaultOutputName(fileName));
+    const response = await fetch('/api/export-frame', { method: 'POST', body: form });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Could not save the frame.');
+    outputName.value = data.filename;
+    setStatus(`Saved ${data.filename} to ${data.path}.`, 'success');
+  } catch (error) {
+    setStatus(error.message || 'Could not save the candidate frame.', 'error');
+  } finally {
+    updateExportAvailability();
+  }
 });

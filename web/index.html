@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pixel Motion Workbench</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/controls.css">
 </head>
 <body>
   <main class="page">
@@ -18,7 +19,14 @@
         <section class="compare-panel" aria-labelledby="sourceHeading">
           <div class="preview-heading-row">
             <p id="sourceHeading" class="eyebrow">SOURCE SPRITE</p>
-            <button id="changeImageButton" class="secondary-button compact-button" type="button" hidden>Change Image...</button>
+            <div class="source-actions">
+              <div class="zoom-controls" aria-label="Source zoom controls">
+                <button id="sourceZoomOutButton" class="zoom-button" type="button" disabled>-</button>
+                <span id="sourceZoomValue" class="zoom-value">100%</span>
+                <button id="sourceZoomInButton" class="zoom-button" type="button" disabled>+</button>
+              </div>
+              <button id="changeImageButton" class="secondary-button compact-button" type="button" hidden>Change Image...</button>
+            </div>
           </div>
           <div id="sourceFrame" class="compare-frame" tabindex="0">
             <div class="compare-stage">
@@ -43,7 +51,7 @@
         <section class="compare-panel" aria-labelledby="outputHeading">
           <div class="preview-heading-row">
             <p id="outputHeading" class="eyebrow">MOTION PREVIEW</p>
-            <div class="zoom-controls">
+            <div class="zoom-controls" aria-label="Preview zoom controls">
               <button id="zoomOutButton" class="zoom-button" type="button" disabled>-</button>
               <span id="zoomValue" class="zoom-value">100%</span>
               <button id="zoomInButton" class="zoom-button" type="button" disabled>+</button>
@@ -55,7 +63,7 @@
               <div class="preview-empty">Choose an image, select a rigid part, then define its pivot and motion.</div>
             </div>
           </div>
-          <div id="previewState" class="preview-state">The first slice focuses on deterministic rigid motion. Newly exposed pixels are intentionally left transparent for now.</div>
+          <div id="previewState" class="preview-state">Zoom either view before selecting a part for more pixel-accurate lassoing. Newly exposed pixels are intentionally left transparent for now.</div>
         </section>
       </div>
 
@@ -66,7 +74,7 @@
             <div class="info-grid">
               <div>
                 <label>Current workflow</label>
-                <p class="field-note info-copy">1. Load a pixel-ready sprite. 2. Draw a loose lasso around the part to move. 3. Click Set Pivot and place its hinge or attachment point. 4. Adjust rotation or translation. 5. Export the candidate frame.</p>
+                <p class="field-note info-copy">1. Load a pixel-ready sprite. 2. Zoom in if needed. 3. Draw a lasso around the part to move. 4. Set its pivot. 5. Adjust rotation or translation with sliders or exact values. 6. Choose an output folder and export.</p>
               </div>
               <div class="selection-status">
                 <span class="selection-status-dot"></span>
@@ -80,18 +88,28 @@
 
           <div class="control">
             <div class="label-row"><label for="rotation">Rotation</label><span class="hint">degrees</span></div>
-            <input id="rotation" type="number" min="-360" max="360" step="1" value="0" disabled>
-            <p class="field-note">Positive values rotate clockwise around the selected pivot.</p>
+            <div class="slider-number-row">
+              <input id="rotationSlider" type="range" min="-180" max="180" step="1" value="0" disabled aria-label="Rotation slider">
+              <input id="rotation" type="number" min="-360" max="360" step="1" value="0" disabled aria-label="Rotation value">
+            </div>
+            <p class="field-note">Drag for quick changes or type an exact value. Positive values rotate clockwise around the selected pivot.</p>
           </div>
 
           <div class="control">
             <div class="label-row"><label>Translation</label><span class="hint">pixels</span></div>
-            <div class="size-row">
-              <input id="translateX" type="number" min="-1024" max="1024" step="1" value="0" aria-label="Horizontal translation" disabled>
-              <span class="times">x</span>
-              <input id="translateY" type="number" min="-1024" max="1024" step="1" value="0" aria-label="Vertical translation" disabled>
+            <div class="translation-stack">
+              <div class="axis-row">
+                <span class="axis-label">X</span>
+                <input id="translateXSlider" type="range" min="-256" max="256" step="1" value="0" disabled aria-label="Horizontal translation slider">
+                <input id="translateX" type="number" min="-1024" max="1024" step="1" value="0" aria-label="Horizontal translation value" disabled>
+              </div>
+              <div class="axis-row">
+                <span class="axis-label">Y</span>
+                <input id="translateYSlider" type="range" min="-256" max="256" step="1" value="0" disabled aria-label="Vertical translation slider">
+                <input id="translateY" type="number" min="-1024" max="1024" step="1" value="0" aria-label="Vertical translation value" disabled>
+              </div>
             </div>
-            <p class="field-note">Move the selected part without redrawing the rest of the sprite.</p>
+            <p class="field-note">Sliders cover common movement ranges. Type larger exact values when needed.</p>
           </div>
 
           <div class="control">
@@ -104,6 +122,19 @@
             <div id="pivotReadout" class="readout">Not set</div>
           </div>
 
+          <div class="control full-width">
+            <div class="label-row"><label>Export destination</label></div>
+            <div class="folder-box">
+              <button id="folderButton" class="secondary-button" type="button">Choose Folder...</button>
+              <div id="folderPath" class="folder-path">Choose a folder for exported animation frames.</div>
+            </div>
+          </div>
+
+          <div class="control full-width">
+            <div class="label-row"><label for="outputName">File name</label></div>
+            <input id="outputName" type="text" value="motion-frame.png" spellcheck="false">
+          </div>
+
           <div class="action">
             <button id="exportButton" class="primary" type="button" disabled>Export Candidate Frame</button>
             <div id="status" class="status" aria-live="polite">Load an image to begin.</div>
@@ -112,7 +143,7 @@
       </div>
     </section>
 
-    <p class="privacy">Runs locally in your browser on this Mac. This first milestone uses deterministic pixel transforms only and does not send images to an AI service.</p>
+    <p class="privacy">Runs locally on this Mac. Rigid transforms stay in the browser, and exported PNGs are saved only to the folder you choose.</p>
   </main>
   <script src="/app.js"></script>
 </body>
