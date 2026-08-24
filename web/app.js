@@ -70,7 +70,7 @@ function updateMotionTypeUI() {
   depthAngleControl.hidden = !depth;
   perspectiveControl.hidden = !depth;
   motionTypeNote.textContent = depth
-    ? 'Depth flip keeps the hinge fixed and simulates a lever moving toward the viewer, through the midpoint, and downward.'
+    ? 'Depth flip keeps the hinge fixed, shortens the projected lever as it points toward the viewer, and enlarges the end that moves closer to the camera.'
     : 'Screen rotation preserves the original first-version behavior.';
   setMotionControlsEnabled(Boolean(pivot));
   renderOutput();
@@ -86,8 +86,8 @@ function resetMotion() {
   translateYInput.value = '0';
   depthAngleInput.value = '0';
   depthAngleNumber.value = '0';
-  perspectiveInput.value = '20';
-  perspectiveReadout.textContent = '20% width emphasis near the camera-facing midpoint.';
+  perspectiveInput.value = '55';
+  perspectiveReadout.textContent = '55% depth perspective. Pixels farther from the hinge grow more as they approach the viewer.';
   setMotionControlsEnabled(false);
   selectionReadout.textContent = 'Not selected';
   pivotReadout.textContent = 'Not set';
@@ -269,27 +269,72 @@ function drawScreenTransform(activePivot) {
 function drawDepthFlip(activePivot) {
   const angleDegrees = Number(depthAngleInput.value || 0);
   const radians = angleDegrees * Math.PI / 180;
+  const bounds = boundsFromLasso();
+  if (!bounds) return;
 
-  // Orthographic hinge approximation: the visible lever length follows cos(theta).
-  // Positive at 0°, zero at 90°, negative after 90°, which naturally flips it below the hinge.
-  let yScale = Math.cos(radians);
+  const cosine = Math.cos(radians);
+  const towardViewer = Math.max(0, Math.sin(radians));
+  const perspectiveStrength = Number(perspectiveInput.value || 0) / 100;
 
-  // Avoid a mathematically zero-height frame so the camera-facing midpoint remains visible.
-  const minimumDepthThickness = 0.08;
-  if (Math.abs(yScale) < minimumDepthThickness) {
-    yScale = (yScale < 0 ? -1 : 1) * minimumDepthThickness;
+  // A paper-thin orthographic projection disappears completely at 90 degrees. Real levers have
+  // thickness, so preserve a small amount of projected length near the camera-facing midpoint.
+  const minimumProjectedLength = 0.16 * towardViewer;
+  let projectedLengthFactor = cosine;
+  if (Math.abs(projectedLengthFactor) < minimumProjectedLength) {
+    const direction = angleDegrees <= 90 ? 1 : -1;
+    projectedLengthFactor = direction * minimumProjectedLength;
   }
 
-  // Give the part a small width emphasis as it points toward the viewer.
-  const perspectiveStrength = Number(perspectiveInput.value || 0) / 100;
-  const towardViewer = Math.sin(radians);
-  const xScale = 1 + perspectiveStrength * Math.abs(towardViewer);
+  const topDistance = Math.abs(bounds.y - activePivot.y);
+  const bottomDistance = Math.abs(bounds.y + bounds.height - activePivot.y);
+  const maximumDistance = Math.max(1, topDistance, bottomDistance);
+
+  // Draw horizontal pixel strips instead of scaling the whole selection uniformly. Rows farther
+  // from the hinge represent the end of the lever, so they receive more perspective enlargement
+  // as they move toward the viewer. This keeps the hinge anchored while making the knob actually
+  // appear nearer instead of merely shrinking the entire sprite.
+  const strips = [];
+  const firstY = Math.max(0, bounds.y);
+  const lastY = Math.min(partCanvas.height, bounds.y + bounds.height + 1);
+
+  for (let sourceY = firstY; sourceY < lastY; sourceY += 1) {
+    const distanceFromPivot = sourceY + 0.5 - activePivot.y;
+    const normalizedDistance = Math.min(1, Math.abs(distanceFromPivot) / maximumDistance);
+    const nearScale = 1 + perspectiveStrength * 1.8 * towardViewer * normalizedDistance;
+
+    const projectedCenterY = activePivot.y + distanceFromPivot * projectedLengthFactor;
+    const projectedX = activePivot.x + (bounds.x - activePivot.x) * nearScale;
+    const projectedWidth = Math.max(1, bounds.width * nearScale);
+    const projectedRowHeight = Math.max(1, nearScale * 0.9);
+
+    strips.push({
+      sourceY,
+      normalizedDistance,
+      x: projectedX,
+      y: projectedCenterY - projectedRowHeight / 2,
+      width: projectedWidth,
+      height: projectedRowHeight
+    });
+  }
+
+  // Nearer rows are painted last so the camera-facing end naturally sits in front at strong angles.
+  strips.sort((a, b) => a.normalizedDistance - b.normalizedDistance);
 
   outputCtx.save();
-  outputCtx.translate(activePivot.x, activePivot.y);
-  outputCtx.scale(xScale, yScale);
-  outputCtx.translate(-activePivot.x, -activePivot.y);
-  outputCtx.drawImage(partCanvas, 0, 0);
+  outputCtx.imageSmoothingEnabled = false;
+  for (const strip of strips) {
+    outputCtx.drawImage(
+      partCanvas,
+      bounds.x,
+      strip.sourceY,
+      bounds.width,
+      1,
+      strip.x,
+      strip.y,
+      strip.width,
+      strip.height
+    );
+  }
   outputCtx.restore();
 }
 
@@ -414,13 +459,14 @@ function setDepthAngle(value) {
   depthAngleInput.value = String(safe);
   depthAngleNumber.value = String(safe);
   renderOutput();
-  setStatus(`Depth flip updated to ${safe}°.`, 'success');
+  setStatus(`Depth flip updated to ${safe}°.
+`, 'success');
 }
 
 depthAngleInput.addEventListener('input', () => setDepthAngle(depthAngleInput.value));
 depthAngleNumber.addEventListener('input', () => setDepthAngle(depthAngleNumber.value));
 perspectiveInput.addEventListener('input', () => {
-  perspectiveReadout.textContent = `${perspectiveInput.value}% width emphasis near the camera-facing midpoint.`;
+  perspectiveReadout.textContent = `${perspectiveInput.value}% depth perspective. Pixels farther from the hinge grow more as they approach the viewer.`;
   renderOutput();
   setStatus('Perspective strength updated.', 'success');
 });
