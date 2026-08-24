@@ -1,0 +1,30 @@
+iconify-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+}
+
+.tool-button-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-button-with-icon iconify-icon {
+  font-size: 16px;
+  flex: none;
+}
+
+#sourceFrame.move-view-active,
+#sourceFrame.move-view-active #sourceCanvas {
+  cursor: grab !important;
+}
+
+#sourceFrame.move-view-active.is-panning,
+#sourceFrame.move-view-active.is-panning #sourceCanvas {
+  cursor: grabbing !important;
+}
+
+#sourceFrame.move-view-active {
+  touch-action: none;
+}
