@@ -66,7 +66,7 @@
             <div class="info-grid">
               <div>
                 <label>Current workflow</label>
-                <p class="field-note info-copy">1. Load a pixel-ready sprite. 2. Draw a loose lasso around only the part that moves. 3. Click Set Pivot and place its hinge or attachment point. 4. Choose Screen rotation or Hinge pull / depth flip. 5. Adjust the motion and export the candidate frame.</p>
+                <p class="field-note info-copy">1. Load a pixel-ready sprite. 2. Draw a loose lasso around only the part that moves. 3. Click Set Pivot and place its hinge or attachment point. 4. Choose Screen rotation or Hinge pull / depth flip. 5. Combine depth and left/right rotation as needed, then export the candidate frame.</p>
               </div>
               <div class="selection-status">
                 <span class="selection-status-dot"></span>
@@ -82,15 +82,15 @@
             <div class="label-row"><label for="motionType">Motion type</label></div>
             <select id="motionType" disabled>
               <option value="screen" selected>Screen rotation / translation</option>
-              <option value="depth">Hinge pull / depth flip</option>
+              <option value="depth">Hinge pull / depth flip + screen rotation</option>
             </select>
             <p id="motionTypeNote" class="field-note">Screen rotation preserves the original first-version behavior.</p>
           </div>
 
           <div id="screenRotationControl" class="control">
-            <div class="label-row"><label for="rotation">Screen rotation</label><span class="hint">degrees</span></div>
+            <div class="label-row"><label for="rotation">Left / right rotation</label><span class="hint">degrees</span></div>
             <input id="rotation" type="number" min="-360" max="360" step="1" value="0" disabled>
-            <p class="field-note">Positive values rotate clockwise in the plane of the screen.</p>
+            <p class="field-note">Rotate clockwise or counterclockwise around the same fixed pivot. In depth mode this is combined with the depth flip.</p>
           </div>
 
           <div id="translationControl" class="control">
@@ -100,7 +100,7 @@
               <span class="times">x</span>
               <input id="translateY" type="number" min="-1024" max="1024" step="1" value="0" aria-label="Vertical translation" disabled>
             </div>
-            <p class="field-note">Move the selected part without redrawing the rest of the sprite.</p>
+            <p class="field-note">Available in screen-only mode. Depth mode keeps the hinge fixed.</p>
           </div>
 
           <div id="depthAngleControl" class="control" hidden>
@@ -110,7 +110,7 @@
               <input id="depthAngleNumber" type="number" min="0" max="180" step="1" value="0" disabled>
               <span class="hint">degrees</span>
             </div>
-            <p class="field-note">The hinge stays fixed. As the lever comes toward the viewer, its screen length shortens while pixels farther from the hinge grow to create a perspective cue. Past 90°, the lever continues below the hinge.</p>
+            <p class="field-note">The pivot stays fixed while the selected part is foreshortened toward the viewer and flips below the hinge.</p>
           </div>
 
           <div id="perspectiveControl" class="control" hidden>
