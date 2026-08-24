@@ -55,7 +55,7 @@
               <div class="preview-empty">Choose an image, select a rigid part, then define its pivot and motion.</div>
             </div>
           </div>
-          <div id="previewState" class="preview-state">Rigid motion keeps the selected part anchored to its pivot. Newly exposed pixels are intentionally left transparent for now.</div>
+          <div id="previewState" class="preview-state">The first slice focuses on deterministic rigid motion. Newly exposed pixels are intentionally left transparent for now.</div>
         </section>
       </div>
 
@@ -66,7 +66,7 @@
             <div class="info-grid">
               <div>
                 <label>Current workflow</label>
-                <p class="field-note info-copy">1. Load a pixel-ready sprite. 2. Draw a loose lasso around only the part that moves. 3. Click Set Pivot and place its hinge or attachment point. 4. Choose Screen rotation or Hinge pull / depth flip. 5. Combine depth and left/right rotation as needed, then export the candidate frame.</p>
+                <p class="field-note info-copy">1. Load a pixel-ready sprite. 2. Draw a loose lasso around the part to move. 3. Click Set Pivot and place its hinge or attachment point. 4. Adjust rotation or translation. 5. Export the candidate frame.</p>
               </div>
               <div class="selection-status">
                 <span class="selection-status-dot"></span>
@@ -78,45 +78,20 @@
             </div>
           </div>
 
-          <div class="control full-width">
-            <div class="label-row"><label for="motionType">Motion type</label></div>
-            <select id="motionType" disabled>
-              <option value="screen" selected>Screen rotation / translation</option>
-              <option value="depth">Hinge pull / depth flip + screen rotation</option>
-            </select>
-            <p id="motionTypeNote" class="field-note">Screen rotation preserves the original first-version behavior.</p>
-          </div>
-
-          <div id="screenRotationControl" class="control">
-            <div class="label-row"><label for="rotation">Left / right rotation</label><span class="hint">degrees</span></div>
+          <div class="control">
+            <div class="label-row"><label for="rotation">Rotation</label><span class="hint">degrees</span></div>
             <input id="rotation" type="number" min="-360" max="360" step="1" value="0" disabled>
-            <p class="field-note">Rotate clockwise or counterclockwise around the same fixed pivot. In depth mode this is combined with the depth flip.</p>
+            <p class="field-note">Positive values rotate clockwise around the selected pivot.</p>
           </div>
 
-          <div id="translationControl" class="control">
+          <div class="control">
             <div class="label-row"><label>Translation</label><span class="hint">pixels</span></div>
             <div class="size-row">
               <input id="translateX" type="number" min="-1024" max="1024" step="1" value="0" aria-label="Horizontal translation" disabled>
               <span class="times">x</span>
               <input id="translateY" type="number" min="-1024" max="1024" step="1" value="0" aria-label="Vertical translation" disabled>
             </div>
-            <p class="field-note">Available in screen-only mode. Depth mode keeps the hinge fixed.</p>
-          </div>
-
-          <div id="depthAngleControl" class="control" hidden>
-            <div class="label-row"><label for="depthAngle">Depth flip</label><span class="hint">0° up · 90° toward viewer · 180° down</span></div>
-            <input id="depthAngle" type="range" min="0" max="180" step="1" value="0" disabled>
-            <div class="size-row" style="margin-top:8px; grid-template-columns: 1fr auto;">
-              <input id="depthAngleNumber" type="number" min="0" max="180" step="1" value="0" disabled>
-              <span class="hint">degrees</span>
-            </div>
-            <p class="field-note">The pivot stays fixed while the selected part is foreshortened toward the viewer and flips below the hinge.</p>
-          </div>
-
-          <div id="perspectiveControl" class="control" hidden>
-            <div class="label-row"><label for="perspective">Depth perspective</label><span class="hint">0-100%</span></div>
-            <input id="perspective" type="range" min="0" max="100" step="1" value="55" disabled>
-            <p id="perspectiveReadout" class="field-note">55% depth perspective. Pixels farther from the hinge grow more as they approach the viewer.</p>
+            <p class="field-note">Move the selected part without redrawing the rest of the sprite.</p>
           </div>
 
           <div class="control">
@@ -137,7 +112,7 @@
       </div>
     </section>
 
-    <p class="privacy">Runs locally in your browser on this Mac. Rigid transforms are deterministic and do not send images to an AI service.</p>
+    <p class="privacy">Runs locally in your browser on this Mac. This first milestone uses deterministic pixel transforms only and does not send images to an AI service.</p>
   </main>
   <script src="/app.js"></script>
 </body>

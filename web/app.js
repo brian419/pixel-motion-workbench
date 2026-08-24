@@ -12,19 +12,9 @@ const fileMeta = document.getElementById('fileMeta');
 const selectionSummary = document.getElementById('selectionSummary');
 const selectionReadout = document.getElementById('selectionReadout');
 const pivotReadout = document.getElementById('pivotReadout');
-const motionType = document.getElementById('motionType');
-const motionTypeNote = document.getElementById('motionTypeNote');
-const screenRotationControl = document.getElementById('screenRotationControl');
-const translationControl = document.getElementById('translationControl');
-const depthAngleControl = document.getElementById('depthAngleControl');
-const perspectiveControl = document.getElementById('perspectiveControl');
 const rotationInput = document.getElementById('rotation');
 const translateXInput = document.getElementById('translateX');
 const translateYInput = document.getElementById('translateY');
-const depthAngleInput = document.getElementById('depthAngle');
-const depthAngleNumber = document.getElementById('depthAngleNumber');
-const perspectiveInput = document.getElementById('perspective');
-const perspectiveReadout = document.getElementById('perspectiveReadout');
 const exportButton = document.getElementById('exportButton');
 const status = document.getElementById('status');
 const zoomOutButton = document.getElementById('zoomOutButton');
@@ -51,57 +41,17 @@ function setStatus(message, kind = '') {
   status.className = `status ${kind}`.trim();
 }
 
-function setMotionControlsEnabled(enabled) {
-  motionType.disabled = !enabled;
-  exportButton.disabled = !enabled;
-  const depth = motionType.value === 'depth';
-
-  // Left/right rotation is intentionally available in both modes.
-  rotationInput.disabled = !enabled;
-
-  // Translation remains screen-only so a depth flip keeps its hinge anchored.
-  translateXInput.disabled = !enabled || depth;
-  translateYInput.disabled = !enabled || depth;
-
-  depthAngleInput.disabled = !enabled || !depth;
-  depthAngleNumber.disabled = !enabled || !depth;
-  perspectiveInput.disabled = !enabled || !depth;
-}
-
-function updateMotionTypeUI() {
-  const depth = motionType.value === 'depth';
-
-  // Rotation stays visible in both modes so depth and left/right motion can be combined.
-  screenRotationControl.hidden = false;
-  translationControl.hidden = depth;
-  depthAngleControl.hidden = !depth;
-  perspectiveControl.hidden = !depth;
-
-  motionTypeNote.textContent = depth
-    ? 'Depth flip keeps the hinge fixed while also allowing left/right rotation around that same pivot.'
-    : 'Screen rotation preserves the original first-version behavior.';
-
-  setMotionControlsEnabled(Boolean(pivot));
-  renderOutput();
-}
-
 function resetMotion() {
   lasso = [];
   pivot = null;
   drawingLasso = false;
-  motionType.value = 'screen';
   rotationInput.value = '0';
   translateXInput.value = '0';
   translateYInput.value = '0';
-  depthAngleInput.value = '0';
-  depthAngleNumber.value = '0';
-  perspectiveInput.value = '55';
-  perspectiveReadout.textContent = '55% depth perspective. Pixels farther from the hinge grow more as they approach the viewer.';
-  setMotionControlsEnabled(false);
+  [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = true; });
   selectionReadout.textContent = 'Not selected';
   pivotReadout.textContent = 'Not set';
-  selectionSummary.textContent = loadedImage ? 'Draw a lasso around only the rigid part you want to move.' : 'No image loaded yet.';
-  updateMotionTypeUI();
+  selectionSummary.textContent = loadedImage ? 'Draw a lasso around the rigid part you want to move.' : 'No image loaded yet.';
   renderAll();
 }
 
@@ -157,7 +107,7 @@ function loadFile(file) {
     resetMotion();
     applyZoom();
     setTool('select');
-    setStatus('Image loaded. Draw a lasso around only the moving rigid part.', 'success');
+    setStatus('Image loaded. Draw a lasso around one rigid part.', 'success');
     URL.revokeObjectURL(url);
   };
   image.onerror = () => {
@@ -174,10 +124,10 @@ function setTool(nextTool) {
   });
   if (tool === 'select') {
     sourceCanvas.style.cursor = 'crosshair';
-    selectionSummary.textContent = lasso.length >= 3 ? 'Selection ready. Redraw it at any time, or set the pivot.' : 'Draw a loose lasso around only the rigid part you want to move.';
+    selectionSummary.textContent = lasso.length >= 3 ? 'Selection ready. Redraw it at any time, or set the pivot.' : 'Draw a loose lasso around the rigid part you want to move.';
   } else if (tool === 'pivot') {
     sourceCanvas.style.cursor = 'cell';
-    selectionSummary.textContent = 'Click the exact hinge or attachment point. This point remains fixed during a depth flip.';
+    selectionSummary.textContent = 'Click the hinge or attachment point for the selected part.';
   } else {
     sourceCanvas.style.cursor = 'default';
     selectionSummary.textContent = 'Pan mode is reserved for linked viewport navigation. Use the scrollbars for now.';
@@ -262,99 +212,6 @@ function renderSource() {
   }
 }
 
-function drawScreenTransform(activePivot) {
-  const angle = Number(rotationInput.value || 0) * Math.PI / 180;
-  const dx = Number(translateXInput.value || 0);
-  const dy = Number(translateYInput.value || 0);
-
-  outputCtx.save();
-  outputCtx.translate(activePivot.x + dx, activePivot.y + dy);
-  outputCtx.rotate(angle);
-  outputCtx.translate(-activePivot.x, -activePivot.y);
-  outputCtx.drawImage(partCanvas, 0, 0);
-  outputCtx.restore();
-}
-
-function drawDepthFlip(activePivot) {
-  const angleDegrees = Number(depthAngleInput.value || 0);
-  const radians = angleDegrees * Math.PI / 180;
-  const screenAngle = Number(rotationInput.value || 0) * Math.PI / 180;
-  const bounds = boundsFromLasso();
-  if (!bounds) return;
-
-  const cosine = Math.cos(radians);
-  const towardViewer = Math.max(0, Math.sin(radians));
-  const perspectiveStrength = Number(perspectiveInput.value || 0) / 100;
-
-  // A paper-thin orthographic projection disappears completely at 90 degrees. Real levers have
-  // thickness, so preserve a small amount of projected length near the camera-facing midpoint.
-  const minimumProjectedLength = 0.16 * towardViewer;
-  let projectedLengthFactor = cosine;
-  if (Math.abs(projectedLengthFactor) < minimumProjectedLength) {
-    const direction = angleDegrees <= 90 ? 1 : -1;
-    projectedLengthFactor = direction * minimumProjectedLength;
-  }
-
-  const topDistance = Math.abs(bounds.y - activePivot.y);
-  const bottomDistance = Math.abs(bounds.y + bounds.height - activePivot.y);
-  const maximumDistance = Math.max(1, topDistance, bottomDistance);
-
-  // Draw horizontal pixel strips instead of scaling the whole selection uniformly. Rows farther
-  // from the hinge represent the end of the lever, so they receive more perspective enlargement
-  // as they move toward the viewer. This keeps the hinge anchored while making the knob actually
-  // appear nearer instead of merely shrinking the entire sprite.
-  const strips = [];
-  const firstY = Math.max(0, bounds.y);
-  const lastY = Math.min(partCanvas.height, bounds.y + bounds.height + 1);
-
-  for (let sourceY = firstY; sourceY < lastY; sourceY += 1) {
-    const distanceFromPivot = sourceY + 0.5 - activePivot.y;
-    const normalizedDistance = Math.min(1, Math.abs(distanceFromPivot) / maximumDistance);
-    const nearScale = 1 + perspectiveStrength * 1.8 * towardViewer * normalizedDistance;
-
-    const projectedCenterY = activePivot.y + distanceFromPivot * projectedLengthFactor;
-    const projectedX = activePivot.x + (bounds.x - activePivot.x) * nearScale;
-    const projectedWidth = Math.max(1, bounds.width * nearScale);
-    const projectedRowHeight = Math.max(1, nearScale * 0.9);
-
-    strips.push({
-      sourceY,
-      normalizedDistance,
-      x: projectedX,
-      y: projectedCenterY - projectedRowHeight / 2,
-      width: projectedWidth,
-      height: projectedRowHeight
-    });
-  }
-
-  // Nearer rows are painted last so the camera-facing end naturally sits in front at strong angles.
-  strips.sort((a, b) => a.normalizedDistance - b.normalizedDistance);
-
-  outputCtx.save();
-  outputCtx.imageSmoothingEnabled = false;
-
-  // Apply left/right screen rotation around the same hinge after calculating depth projection.
-  // This lets a lever come toward the camera and also swing left or right in the same frame.
-  outputCtx.translate(activePivot.x, activePivot.y);
-  outputCtx.rotate(screenAngle);
-  outputCtx.translate(-activePivot.x, -activePivot.y);
-
-  for (const strip of strips) {
-    outputCtx.drawImage(
-      partCanvas,
-      bounds.x,
-      strip.sourceY,
-      bounds.width,
-      1,
-      strip.x,
-      strip.y,
-      strip.width,
-      strip.height
-    );
-  }
-  outputCtx.restore();
-}
-
 function renderOutput() {
   outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
   if (!loadedImage) return;
@@ -373,12 +230,16 @@ function renderOutput() {
     const bounds = boundsFromLasso();
     return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
   })();
+  const angle = Number(rotationInput.value || 0) * Math.PI / 180;
+  const dx = Number(translateXInput.value || 0);
+  const dy = Number(translateYInput.value || 0);
 
-  if (motionType.value === 'depth') {
-    drawDepthFlip(activePivot);
-  } else {
-    drawScreenTransform(activePivot);
-  }
+  outputCtx.save();
+  outputCtx.translate(activePivot.x + dx, activePivot.y + dy);
+  outputCtx.rotate(angle);
+  outputCtx.translate(-activePivot.x, -activePivot.y);
+  outputCtx.drawImage(partCanvas, 0, 0);
+  outputCtx.restore();
 }
 
 function renderAll() {
@@ -393,13 +254,12 @@ sourceCanvas.addEventListener('pointerdown', event => {
     drawingLasso = true;
     lasso = [canvasPoint(event)];
     pivot = null;
-    setMotionControlsEnabled(false);
     renderAll();
   } else if (tool === 'pivot' && lasso.length >= 3) {
     pivot = canvasPoint(event);
     pivotReadout.textContent = `(${Math.round(pivot.x)}, ${Math.round(pivot.y)})`;
-    setMotionControlsEnabled(true);
-    selectionSummary.textContent = 'Pivot set. Choose a motion type and adjust the candidate frame.';
+    [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = false; });
+    selectionSummary.textContent = 'Pivot set. Adjust rotation or translation to build the candidate frame.';
     setStatus('Pivot set. Motion controls are ready.', 'success');
     renderAll();
   }
@@ -426,8 +286,8 @@ sourceCanvas.addEventListener('pointerup', event => {
     const bounds = boundsFromLasso();
     selectionReadout.textContent = `${bounds.width} × ${bounds.height}px region near (${bounds.x}, ${bounds.y})`;
     pivotReadout.textContent = 'Not set';
-    setMotionControlsEnabled(false);
-    selectionSummary.textContent = 'Selection ready. Click Set Pivot, then click its exact hinge or attachment point.';
+    [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = true; });
+    selectionSummary.textContent = 'Selection ready. Click Set Pivot, then click its hinge or attachment point.';
     setStatus('Part selected. Set its pivot next.', 'success');
   }
   renderAll();
@@ -459,42 +319,11 @@ clearSelectionButton.addEventListener('click', () => {
   setStatus('Selection cleared. Draw a new lasso around a rigid part.');
 });
 
-motionType.addEventListener('change', () => {
-  updateMotionTypeUI();
-  setStatus(
-    motionType.value === 'depth'
-      ? 'Depth flip mode selected. Combine Depth flip with Left / right rotation as needed.'
-      : 'Screen rotation mode selected.',
-    'success'
-  );
-});
-
 [rotationInput, translateXInput, translateYInput].forEach(input => {
   input.addEventListener('input', () => {
     renderOutput();
-    setStatus(
-      motionType.value === 'depth'
-        ? `Combined motion updated: ${depthAngleInput.value}° depth, ${rotationInput.value || 0}° left/right.`
-        : 'Candidate frame updated.',
-      'success'
-    );
+    setStatus('Candidate frame updated.', 'success');
   });
-});
-
-function setDepthAngle(value) {
-  const safe = Math.max(0, Math.min(180, Number(value) || 0));
-  depthAngleInput.value = String(safe);
-  depthAngleNumber.value = String(safe);
-  renderOutput();
-  setStatus(`Combined motion updated: ${safe}° depth, ${rotationInput.value || 0}° left/right.`, 'success');
-}
-
-depthAngleInput.addEventListener('input', () => setDepthAngle(depthAngleInput.value));
-depthAngleNumber.addEventListener('input', () => setDepthAngle(depthAngleNumber.value));
-perspectiveInput.addEventListener('input', () => {
-  perspectiveReadout.textContent = `${perspectiveInput.value}% depth perspective. Pixels farther from the hinge grow more as they approach the viewer.`;
-  renderOutput();
-  setStatus('Depth perspective updated.', 'success');
 });
 
 zoomOutButton.addEventListener('click', () => {
@@ -513,10 +342,7 @@ exportButton.addEventListener('click', () => {
   renderOutput();
   const link = document.createElement('a');
   const base = fileName.replace(/\.[^.]+$/, '') || 'frame';
-  const suffix = motionType.value === 'depth'
-    ? `depth-${depthAngleInput.value}-rotate-${rotationInput.value || 0}`
-    : 'motion';
-  link.download = `${base}-${suffix}-frame.png`;
+  link.download = `${base}-motion-frame.png`;
   link.href = outputCanvas.toDataURL('image/png');
   link.click();
   setStatus(`Exported ${link.download}.`, 'success');
