@@ -12,9 +12,19 @@ const fileMeta = document.getElementById('fileMeta');
 const selectionSummary = document.getElementById('selectionSummary');
 const selectionReadout = document.getElementById('selectionReadout');
 const pivotReadout = document.getElementById('pivotReadout');
+const motionType = document.getElementById('motionType');
+const motionTypeNote = document.getElementById('motionTypeNote');
+const screenRotationControl = document.getElementById('screenRotationControl');
+const translationControl = document.getElementById('translationControl');
+const depthAngleControl = document.getElementById('depthAngleControl');
+const perspectiveControl = document.getElementById('perspectiveControl');
 const rotationInput = document.getElementById('rotation');
 const translateXInput = document.getElementById('translateX');
 const translateYInput = document.getElementById('translateY');
+const depthAngleInput = document.getElementById('depthAngle');
+const depthAngleNumber = document.getElementById('depthAngleNumber');
+const perspectiveInput = document.getElementById('perspective');
+const perspectiveReadout = document.getElementById('perspectiveReadout');
 const exportButton = document.getElementById('exportButton');
 const status = document.getElementById('status');
 const zoomOutButton = document.getElementById('zoomOutButton');
@@ -41,17 +51,48 @@ function setStatus(message, kind = '') {
   status.className = `status ${kind}`.trim();
 }
 
+function setMotionControlsEnabled(enabled) {
+  motionType.disabled = !enabled;
+  exportButton.disabled = !enabled;
+  const screen = motionType.value === 'screen';
+  rotationInput.disabled = !enabled || !screen;
+  translateXInput.disabled = !enabled || !screen;
+  translateYInput.disabled = !enabled || !screen;
+  depthAngleInput.disabled = !enabled || screen;
+  depthAngleNumber.disabled = !enabled || screen;
+  perspectiveInput.disabled = !enabled || screen;
+}
+
+function updateMotionTypeUI() {
+  const depth = motionType.value === 'depth';
+  screenRotationControl.hidden = depth;
+  translationControl.hidden = depth;
+  depthAngleControl.hidden = !depth;
+  perspectiveControl.hidden = !depth;
+  motionTypeNote.textContent = depth
+    ? 'Depth flip keeps the hinge fixed and simulates a lever moving toward the viewer, through the midpoint, and downward.'
+    : 'Screen rotation preserves the original first-version behavior.';
+  setMotionControlsEnabled(Boolean(pivot));
+  renderOutput();
+}
+
 function resetMotion() {
   lasso = [];
   pivot = null;
   drawingLasso = false;
+  motionType.value = 'screen';
   rotationInput.value = '0';
   translateXInput.value = '0';
   translateYInput.value = '0';
-  [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = true; });
+  depthAngleInput.value = '0';
+  depthAngleNumber.value = '0';
+  perspectiveInput.value = '20';
+  perspectiveReadout.textContent = '20% width emphasis near the camera-facing midpoint.';
+  setMotionControlsEnabled(false);
   selectionReadout.textContent = 'Not selected';
   pivotReadout.textContent = 'Not set';
-  selectionSummary.textContent = loadedImage ? 'Draw a lasso around the rigid part you want to move.' : 'No image loaded yet.';
+  selectionSummary.textContent = loadedImage ? 'Draw a lasso around only the rigid part you want to move.' : 'No image loaded yet.';
+  updateMotionTypeUI();
   renderAll();
 }
 
@@ -107,7 +148,7 @@ function loadFile(file) {
     resetMotion();
     applyZoom();
     setTool('select');
-    setStatus('Image loaded. Draw a lasso around one rigid part.', 'success');
+    setStatus('Image loaded. Draw a lasso around only the moving rigid part.', 'success');
     URL.revokeObjectURL(url);
   };
   image.onerror = () => {
@@ -124,10 +165,10 @@ function setTool(nextTool) {
   });
   if (tool === 'select') {
     sourceCanvas.style.cursor = 'crosshair';
-    selectionSummary.textContent = lasso.length >= 3 ? 'Selection ready. Redraw it at any time, or set the pivot.' : 'Draw a loose lasso around the rigid part you want to move.';
+    selectionSummary.textContent = lasso.length >= 3 ? 'Selection ready. Redraw it at any time, or set the pivot.' : 'Draw a loose lasso around only the rigid part you want to move.';
   } else if (tool === 'pivot') {
     sourceCanvas.style.cursor = 'cell';
-    selectionSummary.textContent = 'Click the hinge or attachment point for the selected part.';
+    selectionSummary.textContent = 'Click the exact hinge or attachment point. This point remains fixed during a depth flip.';
   } else {
     sourceCanvas.style.cursor = 'default';
     selectionSummary.textContent = 'Pan mode is reserved for linked viewport navigation. Use the scrollbars for now.';
@@ -212,6 +253,46 @@ function renderSource() {
   }
 }
 
+function drawScreenTransform(activePivot) {
+  const angle = Number(rotationInput.value || 0) * Math.PI / 180;
+  const dx = Number(translateXInput.value || 0);
+  const dy = Number(translateYInput.value || 0);
+
+  outputCtx.save();
+  outputCtx.translate(activePivot.x + dx, activePivot.y + dy);
+  outputCtx.rotate(angle);
+  outputCtx.translate(-activePivot.x, -activePivot.y);
+  outputCtx.drawImage(partCanvas, 0, 0);
+  outputCtx.restore();
+}
+
+function drawDepthFlip(activePivot) {
+  const angleDegrees = Number(depthAngleInput.value || 0);
+  const radians = angleDegrees * Math.PI / 180;
+
+  // Orthographic hinge approximation: the visible lever length follows cos(theta).
+  // Positive at 0°, zero at 90°, negative after 90°, which naturally flips it below the hinge.
+  let yScale = Math.cos(radians);
+
+  // Avoid a mathematically zero-height frame so the camera-facing midpoint remains visible.
+  const minimumDepthThickness = 0.08;
+  if (Math.abs(yScale) < minimumDepthThickness) {
+    yScale = (yScale < 0 ? -1 : 1) * minimumDepthThickness;
+  }
+
+  // Give the part a small width emphasis as it points toward the viewer.
+  const perspectiveStrength = Number(perspectiveInput.value || 0) / 100;
+  const towardViewer = Math.sin(radians);
+  const xScale = 1 + perspectiveStrength * Math.abs(towardViewer);
+
+  outputCtx.save();
+  outputCtx.translate(activePivot.x, activePivot.y);
+  outputCtx.scale(xScale, yScale);
+  outputCtx.translate(-activePivot.x, -activePivot.y);
+  outputCtx.drawImage(partCanvas, 0, 0);
+  outputCtx.restore();
+}
+
 function renderOutput() {
   outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
   if (!loadedImage) return;
@@ -230,16 +311,12 @@ function renderOutput() {
     const bounds = boundsFromLasso();
     return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
   })();
-  const angle = Number(rotationInput.value || 0) * Math.PI / 180;
-  const dx = Number(translateXInput.value || 0);
-  const dy = Number(translateYInput.value || 0);
 
-  outputCtx.save();
-  outputCtx.translate(activePivot.x + dx, activePivot.y + dy);
-  outputCtx.rotate(angle);
-  outputCtx.translate(-activePivot.x, -activePivot.y);
-  outputCtx.drawImage(partCanvas, 0, 0);
-  outputCtx.restore();
+  if (motionType.value === 'depth') {
+    drawDepthFlip(activePivot);
+  } else {
+    drawScreenTransform(activePivot);
+  }
 }
 
 function renderAll() {
@@ -254,12 +331,13 @@ sourceCanvas.addEventListener('pointerdown', event => {
     drawingLasso = true;
     lasso = [canvasPoint(event)];
     pivot = null;
+    setMotionControlsEnabled(false);
     renderAll();
   } else if (tool === 'pivot' && lasso.length >= 3) {
     pivot = canvasPoint(event);
     pivotReadout.textContent = `(${Math.round(pivot.x)}, ${Math.round(pivot.y)})`;
-    [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = false; });
-    selectionSummary.textContent = 'Pivot set. Adjust rotation or translation to build the candidate frame.';
+    setMotionControlsEnabled(true);
+    selectionSummary.textContent = 'Pivot set. Choose a motion type and adjust the candidate frame.';
     setStatus('Pivot set. Motion controls are ready.', 'success');
     renderAll();
   }
@@ -286,8 +364,8 @@ sourceCanvas.addEventListener('pointerup', event => {
     const bounds = boundsFromLasso();
     selectionReadout.textContent = `${bounds.width} × ${bounds.height}px region near (${bounds.x}, ${bounds.y})`;
     pivotReadout.textContent = 'Not set';
-    [rotationInput, translateXInput, translateYInput, exportButton].forEach(el => { el.disabled = true; });
-    selectionSummary.textContent = 'Selection ready. Click Set Pivot, then click its hinge or attachment point.';
+    setMotionControlsEnabled(false);
+    selectionSummary.textContent = 'Selection ready. Click Set Pivot, then click its exact hinge or attachment point.';
     setStatus('Part selected. Set its pivot next.', 'success');
   }
   renderAll();
@@ -319,11 +397,32 @@ clearSelectionButton.addEventListener('click', () => {
   setStatus('Selection cleared. Draw a new lasso around a rigid part.');
 });
 
+motionType.addEventListener('change', () => {
+  updateMotionTypeUI();
+  setStatus(motionType.value === 'depth' ? 'Depth flip mode selected. Move the slider toward 180° to pull the lever down.' : 'Screen rotation mode selected.', 'success');
+});
+
 [rotationInput, translateXInput, translateYInput].forEach(input => {
   input.addEventListener('input', () => {
     renderOutput();
     setStatus('Candidate frame updated.', 'success');
   });
+});
+
+function setDepthAngle(value) {
+  const safe = Math.max(0, Math.min(180, Number(value) || 0));
+  depthAngleInput.value = String(safe);
+  depthAngleNumber.value = String(safe);
+  renderOutput();
+  setStatus(`Depth flip updated to ${safe}°.`, 'success');
+}
+
+depthAngleInput.addEventListener('input', () => setDepthAngle(depthAngleInput.value));
+depthAngleNumber.addEventListener('input', () => setDepthAngle(depthAngleNumber.value));
+perspectiveInput.addEventListener('input', () => {
+  perspectiveReadout.textContent = `${perspectiveInput.value}% width emphasis near the camera-facing midpoint.`;
+  renderOutput();
+  setStatus('Perspective strength updated.', 'success');
 });
 
 zoomOutButton.addEventListener('click', () => {
@@ -342,7 +441,8 @@ exportButton.addEventListener('click', () => {
   renderOutput();
   const link = document.createElement('a');
   const base = fileName.replace(/\.[^.]+$/, '') || 'frame';
-  link.download = `${base}-motion-frame.png`;
+  const suffix = motionType.value === 'depth' ? `depth-${depthAngleInput.value}` : 'motion';
+  link.download = `${base}-${suffix}-frame.png`;
   link.href = outputCanvas.toDataURL('image/png');
   link.click();
   setStatus(`Exported ${link.download}.`, 'success');
