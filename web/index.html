@@ -6,6 +6,8 @@
   <title>Pixel Motion Workbench</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/controls.css">
+  <link rel="stylesheet" href="/pan.css">
+  <script src="https://code.iconify.design/iconify-icon/3.0.0/iconify-icon.min.js"></script>
 </head>
 <body>
   <main class="page">
@@ -39,7 +41,10 @@
               <div class="tool-group" role="group" aria-label="Motion tools">
                 <button class="tool-button active" type="button" data-tool="select">Select Part</button>
                 <button class="tool-button" type="button" data-tool="pivot">Set Pivot</button>
-                <button class="tool-button" type="button" data-tool="pan">Pan</button>
+                <button class="tool-button tool-button-with-icon" type="button" data-tool="pan" title="Drag the Source Sprite view to move around while zoomed in">
+                  <iconify-icon icon="heroicons-outline:hand" aria-hidden="true"></iconify-icon>
+                  <span>Move View</span>
+                </button>
               </div>
               <button id="clearSelectionButton" class="secondary-button compact-button" type="button">Clear</button>
             </div>
@@ -74,7 +79,7 @@
             <div class="info-grid">
               <div>
                 <label>Current workflow</label>
-                <p class="field-note info-copy">1. Load a pixel-ready sprite. 2. Zoom in if needed. 3. Draw a lasso around the part to move. 4. Set its pivot. 5. Adjust rotation or translation with sliders or exact values. 6. Choose an output folder and export.</p>
+                <p class="field-note info-copy">1. Load a pixel-ready sprite. 2. Zoom in if needed. 3. Use Move View to position the zoomed source. 4. Draw a lasso around the part to move. 5. Set its pivot. 6. Adjust rotation or translation with sliders or exact values. 7. Choose an output folder and export.</p>
               </div>
               <div class="selection-status">
                 <span class="selection-status-dot"></span>
@@ -146,5 +151,6 @@
     <p class="privacy">Runs locally on this Mac. Rigid transforms stay in the browser, and exported PNGs are saved only to the folder you choose.</p>
   </main>
   <script src="/app.js"></script>
+  <script src="/pan.js"></script>
 </body>
 </html>
