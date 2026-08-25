@@ -2,9 +2,15 @@ const fixButton = document.getElementById('fixButton');
 const fixState = document.getElementById('fixState');
 const fixStatus = document.getElementById('fixStatus');
 let exposedAreaFixEnabled = false;
+let lastRepairCount = 0;
 
-const movedMaskCanvas = document.createElement('canvas');
-const movedMaskCtx = movedMaskCanvas.getContext('2d', { willReadFrequently: true });
+const movedPartCanvas = document.createElement('canvas');
+const movedPartCtx = movedPartCanvas.getContext('2d', { willReadFrequently: true });
+
+const SELECTED_ALPHA_THRESHOLD = 16;
+const MOVED_COVERAGE_THRESHOLD = 16;
+const ATTACHMENT_SEARCH_RADIUS = 5;
+const COLOR_SEARCH_RADIUS = 8;
 
 function updateFixButton() {
   if (!fixButton) return;
@@ -20,64 +26,26 @@ function updateFixButton() {
 
   if (fixStatus) {
     if (!ready) {
-      fixStatus.textContent = 'Select a part first. The repair only affects pixels exposed by moving that selection.';
+      fixStatus.textContent = 'Select a part first. Repair is limited to the exposed attachment area near the stationary sprite.';
+    } else if (exposedAreaFixEnabled && lastRepairCount > 0) {
+      fixStatus.textContent = `Preview repair is active. ${lastRepairCount} exposed attachment pixel${lastRepairCount === 1 ? '' : 's'} repaired.`;
     } else if (exposedAreaFixEnabled) {
-      fixStatus.textContent = 'Preview repair is active. Rotation and translation changes update the repaired preview immediately.';
+      fixStatus.textContent = 'Preview repair is active, but no exposed attachment pixels were detected for this motion.';
     } else {
-      fixStatus.textContent = 'Off. Enable this after moving a part if its original attachment area leaves a transparent hole.';
+      fixStatus.textContent = 'Off. Enable this after moving a part if its original attachment point leaves a transparent hole.';
     }
   }
 }
 
-function mostCommonNeighborColor(pixels, movedMask, width, height, x, y) {
-  const counts = new Map();
-  const offsets = [
-    [-1, -1], [0, -1], [1, -1],
-    [-1, 0],           [1, 0],
-    [-1, 1],  [0, 1],  [1, 1]
-  ];
-
-  for (const [dx, dy] of offsets) {
-    const nx = x + dx;
-    const ny = y + dy;
-    if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-
-    const pixelIndex = ny * width + nx;
-    const p = pixelIndex * 4;
-    if (pixels[p + 3] === 0) continue;
-
-    // Do not let the newly moved lever/part seed the repair. The fill should be
-    // inferred from the stationary sprite colors surrounding the old attachment area.
-    if (movedMask[p + 3] > 0) continue;
-
-    const key = `${pixels[p]},${pixels[p + 1]},${pixels[p + 2]},${pixels[p + 3]}`;
-    const current = counts.get(key);
-    if (current) {
-      current.count += 1;
-    } else {
-      counts.set(key, {
-        count: 1,
-        rgba: [pixels[p], pixels[p + 1], pixels[p + 2], pixels[p + 3]]
-      });
-    }
-  }
-
-  let best = null;
-  for (const entry of counts.values()) {
-    if (!best || entry.count > best.count) best = entry;
-  }
-  return best ? best.rgba : null;
-}
-
-function buildMovedMask() {
+function buildMovedPartFootprint() {
   const width = outputCanvas.width;
   const height = outputCanvas.height;
-  movedMaskCanvas.width = width;
-  movedMaskCanvas.height = height;
-  movedMaskCtx.imageSmoothingEnabled = false;
-  movedMaskCtx.clearRect(0, 0, width, height);
+  movedPartCanvas.width = width;
+  movedPartCanvas.height = height;
+  movedPartCtx.imageSmoothingEnabled = false;
+  movedPartCtx.clearRect(0, 0, width, height);
 
-  buildMask();
+  buildPart();
   if (lasso.length < 3) return;
 
   const activePivot = pivot || (() => {
@@ -88,80 +56,142 @@ function buildMovedMask() {
   const dx = Number(translateXInput.value || 0);
   const dy = Number(translateYInput.value || 0);
 
-  movedMaskCtx.save();
-  movedMaskCtx.translate(activePivot.x + dx, activePivot.y + dy);
-  movedMaskCtx.rotate(angle);
-  movedMaskCtx.translate(-activePivot.x, -activePivot.y);
-  movedMaskCtx.drawImage(maskCanvas, 0, 0);
-  movedMaskCtx.restore();
+  movedPartCtx.save();
+  movedPartCtx.translate(activePivot.x + dx, activePivot.y + dy);
+  movedPartCtx.rotate(angle);
+  movedPartCtx.translate(-activePivot.x, -activePivot.y);
+  movedPartCtx.drawImage(partCanvas, 0, 0);
+  movedPartCtx.restore();
+}
+
+function pixelIsStationary(originalPixels, selectedPixels, width, height, x, y) {
+  if (x < 0 || y < 0 || x >= width || y >= height) return false;
+  const p = (y * width + x) * 4;
+  return originalPixels[p + 3] > 0 && selectedPixels[p + 3] <= SELECTED_ALPHA_THRESHOLD;
+}
+
+function isNearStationarySprite(originalPixels, selectedPixels, width, height, x, y) {
+  for (let radius = 1; radius <= ATTACHMENT_SEARCH_RADIUS; radius += 1) {
+    for (let oy = -radius; oy <= radius; oy += 1) {
+      for (let ox = -radius; ox <= radius; ox += 1) {
+        if (Math.max(Math.abs(ox), Math.abs(oy)) !== radius) continue;
+        if (pixelIsStationary(originalPixels, selectedPixels, width, height, x + ox, y + oy)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function bestNearbyStationaryColor(originalPixels, selectedPixels, width, height, x, y) {
+  for (let radius = 1; radius <= COLOR_SEARCH_RADIUS; radius += 1) {
+    const candidates = new Map();
+
+    for (let oy = -radius; oy <= radius; oy += 1) {
+      for (let ox = -radius; ox <= radius; ox += 1) {
+        if (Math.max(Math.abs(ox), Math.abs(oy)) !== radius) continue;
+        const nx = x + ox;
+        const ny = y + oy;
+        if (!pixelIsStationary(originalPixels, selectedPixels, width, height, nx, ny)) continue;
+
+        const p = (ny * width + nx) * 4;
+        const rgba = [
+          originalPixels[p],
+          originalPixels[p + 1],
+          originalPixels[p + 2],
+          originalPixels[p + 3]
+        ];
+        const key = rgba.join(',');
+        const entry = candidates.get(key);
+        if (entry) {
+          entry.count += 1;
+          entry.distance += Math.hypot(ox, oy);
+        } else {
+          candidates.set(key, {
+            rgba,
+            count: 1,
+            distance: Math.hypot(ox, oy)
+          });
+        }
+      }
+    }
+
+    if (candidates.size > 0) {
+      let best = null;
+      for (const entry of candidates.values()) {
+        if (
+          !best ||
+          entry.count > best.count ||
+          (entry.count === best.count && entry.distance < best.distance)
+        ) {
+          best = entry;
+        }
+      }
+      return best.rgba;
+    }
+  }
+  return null;
 }
 
 function repairExposedArea() {
-  if (!loadedImage || !lasso || lasso.length < 3) return;
+  if (!loadedImage || !lasso || lasso.length < 3) {
+    lastRepairCount = 0;
+    return 0;
+  }
 
-  buildMask();
-  buildMovedMask();
+  buildPart();
+  buildMovedPartFootprint();
 
   const width = outputCanvas.width;
   const height = outputCanvas.height;
   const outputImage = outputCtx.getImageData(0, 0, width, height);
   const originalImage = originalCtx.getImageData(0, 0, width, height);
-  const maskImage = maskCtx.getImageData(0, 0, width, height);
-  const movedMaskImage = movedMaskCtx.getImageData(0, 0, width, height);
-  const repaired = new Uint8ClampedArray(outputImage.data);
+  const selectedImage = partCtx.getImageData(0, 0, width, height);
+  const movedImage = movedPartCtx.getImageData(0, 0, width, height);
 
-  // Repair only opaque source pixels that were actually removed by the transform.
-  // Transparent background accidentally enclosed by a loose lasso is left alone.
-  const eligible = new Uint8Array(width * height);
-  for (let i = 0; i < eligible.length; i += 1) {
-    const p = i * 4;
-    if (
-      maskImage.data[p + 3] > 0 &&
-      originalImage.data[p + 3] > 0 &&
-      outputImage.data[p + 3] === 0
-    ) {
-      eligible[i] = 1;
+  const outputPixels = outputImage.data;
+  const originalPixels = originalImage.data;
+  const selectedPixels = selectedImage.data;
+  const movedPixels = movedImage.data;
+  let repairedCount = 0;
+
+  // The old implementation only repaired pixels whose output alpha was exactly 0.
+  // Canvas lasso edges are anti-aliased, so visibly damaged pixels can retain partial
+  // alpha and never satisfy that test. Instead, detect the old opaque part footprint
+  // directly and ask whether the transformed part still covers each source pixel.
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const p = (y * width + x) * 4;
+      if (selectedPixels[p + 3] <= SELECTED_ALPHA_THRESHOLD) continue;
+      if (movedPixels[p + 3] > MOVED_COVERAGE_THRESHOLD) continue;
+
+      // Do not fill the whole old lever silhouette. Only repair pixels close to the
+      // stationary sprite, which isolates the attachment/hinge hole while leaving the
+      // lever's former path against transparent background transparent.
+      if (!isNearStationarySprite(originalPixels, selectedPixels, width, height, x, y)) continue;
+
+      const color = bestNearbyStationaryColor(
+        originalPixels,
+        selectedPixels,
+        width,
+        height,
+        x,
+        y
+      );
+      if (!color) continue;
+
+      outputPixels[p] = color[0];
+      outputPixels[p + 1] = color[1];
+      outputPixels[p + 2] = color[2];
+      outputPixels[p + 3] = color[3];
+      repairedCount += 1;
     }
   }
 
-  // Grow exact existing sprite colors from the stationary boundary inward. No
-  // interpolation is used, so the preview remains on the existing pixel-art palette.
-  for (let pass = 0; pass < 32; pass += 1) {
-    let changed = false;
-    const next = new Uint8ClampedArray(repaired);
-
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        const pixelIndex = y * width + x;
-        if (!eligible[pixelIndex]) continue;
-
-        const p = pixelIndex * 4;
-        if (repaired[p + 3] !== 0) continue;
-
-        const color = mostCommonNeighborColor(
-          repaired,
-          movedMaskImage.data,
-          width,
-          height,
-          x,
-          y
-        );
-        if (!color) continue;
-
-        next[p] = color[0];
-        next[p + 1] = color[1];
-        next[p + 2] = color[2];
-        next[p + 3] = color[3];
-        changed = true;
-      }
-    }
-
-    repaired.set(next);
-    if (!changed) break;
-  }
-
-  outputImage.data.set(repaired);
   outputCtx.putImageData(outputImage, 0, 0);
+  lastRepairCount = repairedCount;
+  return repairedCount;
 }
 
 const baseRenderOutput = renderOutput;
@@ -173,13 +203,18 @@ renderOutput = function (...args) {
 
 function refreshFixedPreview() {
   baseRenderOutput();
-  if (exposedAreaFixEnabled) repairExposedArea();
+  if (exposedAreaFixEnabled) {
+    repairExposedArea();
+  } else {
+    lastRepairCount = 0;
+  }
   updateFixButton();
 }
 
 const baseResetMotion = resetMotion;
 resetMotion = function (...args) {
   exposedAreaFixEnabled = false;
+  lastRepairCount = 0;
   const result = baseResetMotion(...args);
   updateFixButton();
   return result;
@@ -195,8 +230,8 @@ fixButton.addEventListener('click', () => {
   refreshFixedPreview();
 });
 
-// These listeners run after app.js has updated the normal motion preview. Applying
-// the repair again here guarantees the user sees the fixed pixels live while dragging.
+// app.js renders first. This second pass immediately reapplies attachment repair as
+// the user drags a motion slider or types a value, so Motion Preview is always live.
 [
   rotationInput,
   rotationSlider,
@@ -214,11 +249,13 @@ fixButton.addEventListener('click', () => {
 sourceCanvas.addEventListener('pointerdown', () => {
   if (tool !== 'select' || !exposedAreaFixEnabled) return;
   exposedAreaFixEnabled = false;
+  lastRepairCount = 0;
   updateFixButton();
 });
 
 clearSelectionButton.addEventListener('click', () => {
   exposedAreaFixEnabled = false;
+  lastRepairCount = 0;
   updateFixButton();
 });
 
