@@ -69,7 +69,7 @@
               <div class="preview-empty">Choose an image, select a rigid part, then define its pivot and motion.</div>
             </div>
           </div>
-          <div id="previewState" class="preview-state">Zoom either view before selecting a part for more pixel-accurate lassoing. Use Fix Exposed Area when moving a part leaves a small transparent connection hole.</div>
+          <div id="previewState" class="preview-state">Zoom either view before selecting a part for more pixel-accurate lassoing. Use Exposed Area Repair when moving a part leaves a small transparent connection hole.</div>
         </section>
       </div>
 
@@ -80,7 +80,7 @@
             <div class="info-grid">
               <div>
                 <label>Current workflow</label>
-                <p class="field-note info-copy">1. Load a pixel-ready sprite. 2. Zoom in if needed. 3. Use Move View to position the zoomed source. 4. Draw a lasso around the part to move. 5. Set its pivot. 6. Adjust rotation or translation with sliders or exact values. 7. Turn on Fix Exposed Area if the original attachment point leaves a small hole. 8. Choose an output folder and export.</p>
+                <p class="field-note info-copy">1. Load a pixel-ready sprite. 2. Zoom in if needed. 3. Use Move View to position the zoomed source. 4. Draw a lasso around the part to move. 5. Set its pivot. 6. Adjust rotation or translation with sliders or exact values. 7. Enable Exposed Area Repair if the original attachment point leaves a small hole. 8. Choose an output folder and export.</p>
               </div>
               <div class="selection-status">
                 <span class="selection-status-dot"></span>
@@ -128,6 +128,18 @@
             <div id="pivotReadout" class="readout">Not set</div>
           </div>
 
+          <div class="control full-width repair-control">
+            <div class="repair-copy">
+              <div class="label-row">
+                <label>Exposed Area Repair</label>
+                <span id="fixState" class="repair-state">Off</span>
+              </div>
+              <p class="field-note">Use this after moving a selected part if its old attachment area becomes transparent. The repaired pixels are shown directly in Motion Preview and are included in export.</p>
+              <p id="fixStatus" class="field-note repair-status">Select a part first. The repair only affects pixels exposed by moving that selection.</p>
+            </div>
+            <button id="fixButton" class="secondary-button repair-button" type="button" disabled>Fix Exposed Area</button>
+          </div>
+
           <div class="control full-width">
             <div class="label-row"><label>Export destination</label></div>
             <div class="folder-box">
@@ -142,10 +154,7 @@
           </div>
 
           <div class="action">
-            <div class="action-buttons">
-              <button id="fixButton" class="secondary-button" type="button" disabled>Fix Exposed Area</button>
-              <button id="exportButton" class="primary" type="button" disabled>Export Candidate Frame</button>
-            </div>
+            <button id="exportButton" class="primary" type="button" disabled>Export Candidate Frame</button>
             <div id="status" class="status" aria-live="polite">Load an image to begin.</div>
           </div>
         </div>
