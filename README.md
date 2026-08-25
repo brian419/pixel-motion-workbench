@@ -1,18 +1,69 @@
 # Pixel Motion Workbench
 
-Pixel Motion Workbench is a local tool for creating pixel-art animation frames from an existing pixel-ready image.
+Pixel Motion Workbench is a local tool for turning an existing pixel-ready image into controlled pixel-art animation frames.
 
-The project is built around a simple idea:
+The project is built around one principle:
 
 > **Preserve first. Transform second. Generate only what cannot be derived.**
 
-Instead of asking an image model to redraw an entire sprite for every frame, Pixel Motion Workbench aims to preserve the original pixels, palette, proportions, and attachment points wherever possible. Motion is handled with explicit constraints such as pivots, masks, transforms, deformation controls, and animation phases.
+Instead of asking a general image model to redraw an entire sprite for every animation frame, the workbench preserves the original sprite and applies explicit operations such as selection masks, pivots, rotation, and translation.
 
-The long-term goal is to make it easier to turn a finished pixel sprite into a sequence of animation-ready PNG frames that can be refined in Aseprite and used in engines such as Godot.
+The long-term goal is to make it easier to create animation-ready PNG frames that can be refined in Aseprite and used in engines such as Godot.
+
+## Current prototype status
+
+The current prototype focuses on deterministic rigid-part motion. It is intentionally not an AI image-generation tool.
+
+Implemented now:
+
+- Load PNG, JPEG, and WebP source images.
+- Drag and drop an image into the local web interface.
+- Zoom the **Source Sprite** independently for more precise selection.
+- Zoom the **Motion Preview** independently.
+- Use **Move View** to drag around the zoomed source image.
+- Draw a manual lasso around the part that should move.
+- Set a pivot or hinge point.
+- Rotate the selected part around that pivot.
+- Translate the selected part on X and Y.
+- Adjust rotation and translation with sliders.
+- Type exact rotation and translation values when precision is needed.
+- Preview the transformed frame immediately.
+- Choose an output folder with the native macOS folder picker.
+- Set the exported PNG filename.
+- Save the candidate frame directly to the selected folder.
+- Preserve the rest of the source image rather than regenerating it.
+
+The current rigid transform deliberately leaves newly exposed pixels transparent. Automatic reconstruction of pixels that were hidden behind a moved component is a future problem and is not part of the current working prototype.
+
+## Current workflow
+
+```text
+pixel-ready image
+       ↓
+zoom the Source Sprite if needed
+       ↓
+Move View to position the area precisely
+       ↓
+lasso the rigid part to move
+       ↓
+set its pivot / hinge
+       ↓
+rotate and/or translate
+       ↓
+inspect Motion Preview
+       ↓
+choose output folder + filename
+       ↓
+export PNG frame
+       ↓
+Aseprite cleanup / Godot
+```
+
+For a mechanical part such as a lever, the important idea is that the program moves the original selected pixels around an explicit hinge rather than asking a model to reinterpret what a lever should look like.
 
 ## Why this project exists
 
-A text prompt such as `flip this lever downward` sounds simple, but a generic image model has to infer many things at once:
+A text instruction such as `flip this lever downward` sounds simple, but a general image model has to infer many things at once:
 
 - which pixels belong to the lever
 - where the hinge is located
@@ -22,35 +73,15 @@ A text prompt such as `flip this lever downward` sounds simple, but a generic im
 - which pixels in the rest of the machine must remain unchanged
 - what should appear behind the lever after it moves
 
-That can easily produce frames where a component detaches, changes size, rotates around the wrong point, changes colors, or modifies unrelated parts of the sprite.
+That can easily produce frames where a component detaches, changes dimensions, rotates around the wrong point, changes colors, or modifies unrelated areas.
 
-Pixel Motion Workbench takes a more constrained approach. A user can identify the part that should move, define how it is attached, specify the motion, and let the program calculate as much of the next frame as possible instead of redrawing everything.
+Pixel Motion Workbench takes a more constrained approach: the user identifies the region, defines its attachment point, and specifies the transform. The software then calculates the frame from those explicit constraints.
 
-## Intended workflow
+## Relationship to Aseprite Image Pixel Converter
 
-```text
-pixel-ready PNG
-       ↓
-select a movable or deformable region
-       ↓
-define motion constraints
-       ↓
-preserve original structure and palette
-       ↓
-create the next frame
-       ↓
-compare against previous frames
-       ↓
-repeat or generate in-between frames
-       ↓
-PNG sequence / sprite sheet
-       ↓
-Aseprite / Godot
-```
+Pixel Motion Workbench is intended to complement the [Aseprite Image Pixel Converter](https://github.com/brian419/aseprite-image-pixel-converter), not replace Aseprite itself.
 
-Pixel Motion Workbench is intended to complement tools such as the [Aseprite Image Pixel Converter](https://github.com/brian419/aseprite-image-pixel-converter), not replace Aseprite itself.
-
-A possible pipeline is:
+A practical pipeline is:
 
 ```text
 reference or generated image
@@ -61,22 +92,83 @@ pixel-ready source image
        ↓
 Pixel Motion Workbench
        ↓
-animation frames
+controlled animation frame
        ↓
-Aseprite cleanup
+Aseprite cleanup / additional frame work
        ↓
 Godot
 ```
 
+The converter prepares source artwork for pixel work. Pixel Motion Workbench focuses on moving pieces of that finished pixel artwork while preserving as much of the original as possible.
+
+## Running locally
+
+The current launcher is designed for macOS.
+
+From the repository folder, run:
+
+```bash
+open start.command
+```
+
+The launcher:
+
+1. moves into the repository directory,
+2. creates `.venv` if needed,
+3. installs the Python dependencies,
+4. opens `http://127.0.0.1:8766`, and
+5. starts the local server.
+
+The current Python dependencies are lightweight:
+
+- Flask
+- Waitress
+
+All rigid image transforms happen locally. Exported PNGs are written only to the output folder selected by the user.
+
+## Current project structure
+
+```text
+pixel-motion-workbench/
+├── README.md
+├── requirements.txt
+├── server.py
+├── start.command
+└── web/
+    ├── app.js
+    ├── controls.css
+    ├── index.html
+    ├── pan.css
+    ├── pan.js
+    └── styles.css
+```
+
+`server.py` hosts the local application and handles native folder-selection/export requests. The browser-side files handle selection, zooming, view movement, pivot placement, rigid transforms, preview, and UI controls.
+
+## Current limitations
+
+This is still an early prototype.
+
+- Part selection is manual lasso selection.
+- The lasso must be drawn carefully when the moving component touches stationary artwork.
+- Rotation is a 2D screen-plane transform only.
+- There is no depth or 3D hinge simulation.
+- The tool does not reconstruct hidden artwork after a component moves.
+- There is no animation timeline yet.
+- There is no onion skinning yet.
+- There is no automatic in-between frame generation yet.
+- There is no mesh deformation yet.
+- There is no generative model dependency.
+
+These limitations are intentional while the rigid-motion workflow is being proven.
+
 ## Animation families
 
-Different kinds of animation need different methods. The project is planned around three broad categories.
+The longer-term project separates animation into different families rather than trying to solve every motion with one technique.
 
 ### 1. Mechanical and rigid motion
 
-Best suited for objects that should keep the same shape while moving.
-
-Examples:
+Best suited for objects that should preserve their shape while moving:
 
 - levers
 - doors and hatches
@@ -87,7 +179,7 @@ Examples:
 - machine components
 - crystals or artifacts moving along a path
 
-The preferred approach is deterministic rather than generative:
+The preferred approach is deterministic:
 
 ```text
 part mask
@@ -96,57 +188,42 @@ pivot or attachment point
 +
 translation / rotation
 +
-original palette
+original pixels
        ↓
 new frame
 ```
 
-For example, a lever can be selected once, assigned a hinge point, and rotated around that exact point while the rest of the machine remains pixel-identical.
+This is the family implemented by the current prototype.
 
 ### 2. Deformation
 
-Some objects need to change shape while still preserving their identity.
-
-Examples:
+Some objects need to change shape while preserving their identity:
 
 - slime
 - cloth
 - tentacles
 - branches
 - character limbs
-- soft bags
 - flexible machine parts
 
-These animations may use control points, mesh warping, or other constrained deformation rather than regenerating the sprite from scratch.
+These may eventually use control points, mesh warping, or other constrained deformation instead of regenerating the whole sprite.
 
 ### 3. Organic and generative motion
 
-Some effects naturally change silhouette and topology from frame to frame.
-
-Examples:
+Some effects naturally change silhouette and topology from frame to frame:
 
 - fire
 - smoke
 - explosions
 - magical effects
-- dissipating particles
+- particles
 - liquid effects
 
-These are better candidates for controlled generative assistance. Even here, generation should be constrained by information such as:
-
-- previous frame
-- allowed palette
-- animation phase
-- anchor points
-- maximum silhouette change
-- regions that may change
-- regions that must remain fixed
-
-The goal is not to ask an image model to invent an unrelated next frame. The goal is to generate possible changes inside a well-defined set of rules.
+These are more reasonable candidates for constrained generative assistance. If generation is added, it should still be limited by the previous frame, palette, masks, anchors, and regions that are allowed to change.
 
 ## Preserve the original sprite
 
-For a selected component, the tool should eventually be able to track information such as:
+For a selected component, the workbench can already preserve the original pixel data while applying a rigid transform. Longer term, a component may track information such as:
 
 ```text
 part mask
@@ -158,70 +235,56 @@ parent attachment
 allowed movement
 ```
 
-Whenever possible, transformed frames should reuse those original pixels rather than repainting them.
+That supports rules such as:
 
-This makes it possible to enforce rules such as:
+- keep unrelated pixels unchanged
+- preserve dimensions
+- preserve palette
+- preserve the intended hinge
+- keep motion constrained to the requested operation
 
-- attachment point stays connected
-- length remains consistent
-- palette does not change
-- unrelated pixels remain unchanged
-- movement follows the intended direction
+## Hidden pixels and future reconstruction
 
-## Hidden pixels and repair
+Moving a component can reveal artwork that never existed in the original source image because it was hidden behind that component.
 
-Moving a component can expose pixels that were hidden in the original image.
+For example, rotating a lever away from a machine may expose part of the machine body that was completely covered in the original frame.
 
-For example, moving a lever may reveal a small section of the machine body that did not exist in the source frame.
+That is fundamentally different from rotation itself. The rigid transform can be calculated exactly, but the hidden pixels have to be reconstructed or supplied from somewhere else.
 
-Instead of regenerating the whole machine, the long-term plan is to repair only the newly exposed region:
+A future solution may use a narrowly constrained workflow such as:
 
 ```text
 small missing region
        ↓
-local reconstruction or inpainting
+local reconstruction / inpainting
        ↓
-snap result back to the sprite palette
+palette and structure validation
        ↓
 pixel cleanup if necessary
 ```
 
-Generative AI is therefore treated as a targeted repair or assistance tool rather than the default animation engine.
+The project should avoid regenerating the entire sprite just to solve a small hidden region.
 
-## Candidate generation and validation
+## Planned animation tools
 
-For operations that eventually use generation, the program should be able to create several possible frames and automatically reject obviously bad results.
+Future versions may add:
 
-Possible validation checks include:
-
-- palette preservation
-- attachment preservation
-- object length and size deviation
-- target angle or movement error
-- unexpected changes outside the selected region
-- excessive silhouette change
-- unexpected new colors
-
-The user can then choose from the strongest candidates instead of trusting a single generated result.
-
-## Onion skinning and animation preview
-
-Animation work needs visual comparison between frames. Planned preview tools include:
-
-- previous-frame onion skin
-- adjustable onion-skin opacity
+- multiple frames
 - frame timeline
+- onion skinning
 - loop preview
 - frame stepping
 - playback speed controls
+- automatic in-between frames
+- easing curves
+- palette consistency checks
+- attachment and shape validation
+- constrained deformation
+- narrowly targeted reconstruction tools
 
-The project is not intended to replace Aseprite's complete animation editor. These features exist to make generated or transformed frames easy to inspect before export.
+For rigid motion, intermediate frames can eventually be calculated without AI once the start state, end state, pivot, and timing curve are known.
 
-## Automatic in-between frames
-
-Rigid motion can often generate intermediate frames without AI.
-
-For example:
+Example:
 
 ```text
 Frame 1   lever at -35°
@@ -232,121 +295,63 @@ Frame 5   lever at  21°
 Frame 6   lever at  35°
 ```
 
-Once a start state, end state, pivot, and motion path are known, Pixel Motion Workbench can calculate the frames in between.
+## Possible future AI direction
 
-Later versions may support timing curves such as:
+If machine-learning support is eventually added, the project should favor narrow, controllable tasks rather than unrestricted text-to-image generation.
 
-- linear
-- ease in
-- ease out
-- ease in/out
-- overshoot
-- bounce
-
-## Text instructions
-
-Natural-language instructions may eventually be supported, but text should describe intent rather than directly paint pixels.
-
-For example:
-
-```text
-"flip this lever downward"
-             ↓
-command interpreter
-             ↓
-selected part: lever
-operation: rotate
-direction: clockwise
-target angle: 35°
-preserve attachment: yes
-             ↓
-motion engine
-             ↓
-next frame
-```
-
-This separates language understanding from pixel manipulation and gives the motion engine explicit constraints to follow.
-
-## Possible pixel-native AI direction
-
-If machine-learning support is added later, the project should favor a narrow next-frame problem rather than generic text-to-image generation.
-
-A possible model interface could be:
+A possible interface could be:
 
 ```text
 previous frame
 +
-motion mask
+change mask
 +
 pivot / direction / deformation data
 +
 existing palette
        ↓
-next frame candidate
+next-frame candidate
 ```
 
-Instead of predicting arbitrary RGB values, a future model could predict palette indices from the sprite's existing palette. That would prevent the model from inventing colors that do not belong to the asset.
+Generation should be optional. Deterministic transforms remain the preferred solution whenever the result can be derived mathematically.
 
 ## Development roadmap
 
 | Version | Planned capability | AI required? |
 | --- | --- | --- |
-| **0.1** | Load a pixel PNG, select a part, mark a pivot, rotate or translate it, export the next frame | No |
+| **0.1** | Rigid-part prototype: load image, lasso part, set pivot, rotate/translate, preview, choose output folder, export PNG | No |
 | **0.2** | Multiple frames, timeline, onion skin, animation preview | No |
 | **0.3** | Automatic in-between frame generation | No |
 | **0.4** | Palette and shape consistency validation | No |
 | **0.5** | Mesh or control-point deformation | No |
-| **0.6** | Repair newly exposed pixels | Maybe |
+| **0.6** | Narrow reconstruction of newly exposed pixels | Maybe |
 | **0.7** | Organic motion assistance for fire, smoke, slime, and similar effects | Possibly |
 | **0.8** | Text instruction to structured animation operation | Small local model possible |
 | **0.9** | Controlled generative next-frame candidates | Yes |
 | **1.0** | PNG sequence, sprite sheet, Aseprite-friendly and Godot-friendly export workflow | Mixed |
 
-The exact roadmap may change as each stage is tested.
+The roadmap can change as each stage is tested.
 
-## First milestone
+## Branch workflow
 
-The first milestone deliberately avoids generative AI.
-
-The initial proof of concept should be able to:
-
-1. Load a pixel-art PNG.
-2. Let the user select a rigid component such as a lever.
-3. Let the user mark its attachment or pivot point.
-4. Define a start and end position or angle.
-5. Generate several structurally valid intermediate frames.
-6. Keep unrelated pixels unchanged.
-7. Preserve the original palette.
-8. Preview the motion.
-9. Export the frames as individual PNG files.
-
-If this works reliably, more difficult animation types can be added one problem at a time.
+- `main` is the stable backup/default branch.
+- `development` is the normal integration branch for active work.
+- Temporary feature or experiment branches should start from `development` and be removed after they are either integrated or rejected.
 
 ## Local-first design
 
-Pixel Motion Workbench is intended to run locally and remain useful without requiring a large generative model.
+Pixel Motion Workbench is intended to remain useful without a large local model or cloud image service.
 
-The core architecture should favor lightweight operations such as:
+The core architecture favors lightweight operations such as:
 
 - masks
 - pixel transforms
+- geometry
 - palette analysis
 - interpolation
-- geometry
 - validation
-- small-region repair
 
-If generative backends are added later, they should be optional and pluggable rather than required for the entire application.
-
-A possible future architecture is:
-
-```text
-GeneratorBackend
-    ├── deterministic only
-    ├── small local model
-    ├── local image model
-    └── optional remote provider
-```
+If generative backends are added later, they should be optional rather than required for the application to function.
 
 ## Research direction
 
@@ -364,4 +369,4 @@ Useful references include:
 - [Stretchy Studio](https://github.com/MangoLion/stretchystudio)
 - [LibreSprite](https://github.com/LibreSprite/LibreSprite)
 
-These projects and papers are references for techniques and research directions. Pixel Motion Workbench is intended to develop its own workflow around constrained pixel animation and frame generation.
+These references are research directions, not required dependencies of the current application.
