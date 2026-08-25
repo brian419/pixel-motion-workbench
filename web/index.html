@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/controls.css">
   <link rel="stylesheet" href="/pan.css">
+  <link rel="stylesheet" href="/fix.css">
   <script src="https://code.iconify.design/iconify-icon/3.0.0/iconify-icon.min.js"></script>
 </head>
 <body>
@@ -68,7 +69,7 @@
               <div class="preview-empty">Choose an image, select a rigid part, then define its pivot and motion.</div>
             </div>
           </div>
-          <div id="previewState" class="preview-state">Zoom either view before selecting a part for more pixel-accurate lassoing. Newly exposed pixels are intentionally left transparent for now.</div>
+          <div id="previewState" class="preview-state">Zoom either view before selecting a part for more pixel-accurate lassoing. Use Fix Exposed Area when moving a part leaves a small transparent connection hole.</div>
         </section>
       </div>
 
@@ -79,7 +80,7 @@
             <div class="info-grid">
               <div>
                 <label>Current workflow</label>
-                <p class="field-note info-copy">1. Load a pixel-ready sprite. 2. Zoom in if needed. 3. Use Move View to position the zoomed source. 4. Draw a lasso around the part to move. 5. Set its pivot. 6. Adjust rotation or translation with sliders or exact values. 7. Choose an output folder and export.</p>
+                <p class="field-note info-copy">1. Load a pixel-ready sprite. 2. Zoom in if needed. 3. Use Move View to position the zoomed source. 4. Draw a lasso around the part to move. 5. Set its pivot. 6. Adjust rotation or translation with sliders or exact values. 7. Turn on Fix Exposed Area if the original attachment point leaves a small hole. 8. Choose an output folder and export.</p>
               </div>
               <div class="selection-status">
                 <span class="selection-status-dot"></span>
@@ -141,16 +142,20 @@
           </div>
 
           <div class="action">
-            <button id="exportButton" class="primary" type="button" disabled>Export Candidate Frame</button>
+            <div class="action-buttons">
+              <button id="fixButton" class="secondary-button" type="button" disabled>Fix Exposed Area</button>
+              <button id="exportButton" class="primary" type="button" disabled>Export Candidate Frame</button>
+            </div>
             <div id="status" class="status" aria-live="polite">Load an image to begin.</div>
           </div>
         </div>
       </div>
     </section>
 
-    <p class="privacy">Runs locally on this Mac. Rigid transforms stay in the browser, and exported PNGs are saved only to the folder you choose.</p>
+    <p class="privacy">Runs locally on this Mac. Rigid transforms and exposed-area repair stay in the browser, and exported PNGs are saved only to the folder you choose.</p>
   </main>
   <script src="/app.js"></script>
   <script src="/pan.js"></script>
+  <script src="/fix.js"></script>
 </body>
 </html>
