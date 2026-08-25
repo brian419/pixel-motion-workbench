@@ -7,14 +7,15 @@ let lastRepairCount = 0;
 const movedPartCanvas = document.createElement('canvas');
 const movedPartCtx = movedPartCanvas.getContext('2d', { willReadFrequently: true });
 
-const SELECTED_ALPHA_THRESHOLD = 16;
-const MOVED_COVERAGE_THRESHOLD = 16;
-const ATTACHMENT_SEARCH_RADIUS = 5;
-const COLOR_SEARCH_RADIUS = 8;
+const ALPHA_THRESHOLD = 24;
+const REPAIR_RADIUS = 6;
+const PATCH_RADIUS = 2;
+const SEARCH_RADIUS = 12;
+const MIN_PATCH_SAMPLES = 4;
 
 function updateFixButton() {
   if (!fixButton) return;
-  const ready = Boolean(loadedImage && lasso && lasso.length >= 3);
+  const ready = Boolean(loadedImage && pivot && lasso && lasso.length >= 3);
   fixButton.disabled = !ready;
   fixButton.textContent = exposedAreaFixEnabled ? 'Disable Fix' : 'Fix Exposed Area';
   fixButton.classList.toggle('is-active', exposedAreaFixEnabled);
@@ -26,13 +27,13 @@ function updateFixButton() {
 
   if (fixStatus) {
     if (!ready) {
-      fixStatus.textContent = 'Select a part first. Repair is limited to the exposed attachment area near the stationary sprite.';
+      fixStatus.textContent = 'Set a pivot first. Repair reconstructs only the small vacated attachment area around that pivot.';
     } else if (exposedAreaFixEnabled && lastRepairCount > 0) {
-      fixStatus.textContent = `Preview repair is active. ${lastRepairCount} exposed attachment pixel${lastRepairCount === 1 ? '' : 's'} repaired.`;
+      fixStatus.textContent = `Preview repair is active. ${lastRepairCount} pivot-area pixel${lastRepairCount === 1 ? '' : 's'} reconstructed from nearby sprite patches.`;
     } else if (exposedAreaFixEnabled) {
-      fixStatus.textContent = 'Preview repair is active, but no exposed attachment pixels were detected for this motion.';
+      fixStatus.textContent = 'Preview repair is active, but this motion did not expose pixels inside the pivot repair area.';
     } else {
-      fixStatus.textContent = 'Off. Enable this after moving a part if its original attachment point leaves a transparent hole.';
+      fixStatus.textContent = 'Off. Enable this if moving the selected part exposes a small hole at its pivot or attachment point.';
     }
   }
 }
@@ -64,78 +65,187 @@ function buildMovedPartFootprint() {
   movedPartCtx.restore();
 }
 
-function pixelIsStationary(originalPixels, selectedPixels, width, height, x, y) {
-  if (x < 0 || y < 0 || x >= width || y >= height) return false;
-  const p = (y * width + x) * 4;
-  return originalPixels[p + 3] > 0 && selectedPixels[p + 3] <= SELECTED_ALPHA_THRESHOLD;
+function insideImage(width, height, x, y) {
+  return x >= 0 && y >= 0 && x < width && y < height;
 }
 
-function isNearStationarySprite(originalPixels, selectedPixels, width, height, x, y) {
-  for (let radius = 1; radius <= ATTACHMENT_SEARCH_RADIUS; radius += 1) {
-    for (let oy = -radius; oy <= radius; oy += 1) {
-      for (let ox = -radius; ox <= radius; ox += 1) {
-        if (Math.max(Math.abs(ox), Math.abs(oy)) !== radius) continue;
-        if (pixelIsStationary(originalPixels, selectedPixels, width, height, x + ox, y + oy)) {
-          return true;
-        }
-      }
+function isOldSelectedPixel(selectedPixels, width, x, y) {
+  const p = (y * width + x) * 4;
+  return selectedPixels[p + 3] > ALPHA_THRESHOLD;
+}
+
+function isStationarySourcePixel(selectedPixels, width, x, y) {
+  const p = (y * width + x) * 4;
+  return selectedPixels[p + 3] <= ALPHA_THRESHOLD;
+}
+
+function hasStationaryNeighbor(selectedPixels, width, height, x, y, radius = 2) {
+  for (let oy = -radius; oy <= radius; oy += 1) {
+    for (let ox = -radius; ox <= radius; ox += 1) {
+      if (ox === 0 && oy === 0) continue;
+      const nx = x + ox;
+      const ny = y + oy;
+      if (!insideImage(width, height, nx, ny)) continue;
+      if (isStationarySourcePixel(selectedPixels, width, nx, ny)) return true;
     }
   }
   return false;
 }
 
-function bestNearbyStationaryColor(originalPixels, selectedPixels, width, height, x, y) {
-  for (let radius = 1; radius <= COLOR_SEARCH_RADIUS; radius += 1) {
-    const candidates = new Map();
+function buildRepairMask(selectedPixels, movedPixels, width, height) {
+  const target = new Uint8Array(width * height);
+  if (!pivot) return target;
 
-    for (let oy = -radius; oy <= radius; oy += 1) {
-      for (let ox = -radius; ox <= radius; ox += 1) {
-        if (Math.max(Math.abs(ox), Math.abs(oy)) !== radius) continue;
-        const nx = x + ox;
-        const ny = y + oy;
-        if (!pixelIsStationary(originalPixels, selectedPixels, width, height, nx, ny)) continue;
+  const minX = Math.max(0, Math.floor(pivot.x - REPAIR_RADIUS));
+  const maxX = Math.min(width - 1, Math.ceil(pivot.x + REPAIR_RADIUS));
+  const minY = Math.max(0, Math.floor(pivot.y - REPAIR_RADIUS));
+  const maxY = Math.min(height - 1, Math.ceil(pivot.y + REPAIR_RADIUS));
 
-        const p = (ny * width + nx) * 4;
-        const rgba = [
-          originalPixels[p],
-          originalPixels[p + 1],
-          originalPixels[p + 2],
-          originalPixels[p + 3]
-        ];
-        const key = rgba.join(',');
-        const entry = candidates.get(key);
-        if (entry) {
-          entry.count += 1;
-          entry.distance += Math.hypot(ox, oy);
-        } else {
-          candidates.set(key, {
-            rgba,
-            count: 1,
-            distance: Math.hypot(ox, oy)
-          });
-        }
-      }
-    }
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const dx = x + 0.5 - pivot.x;
+      const dy = y + 0.5 - pivot.y;
+      if (Math.hypot(dx, dy) > REPAIR_RADIUS) continue;
 
-    if (candidates.size > 0) {
-      let best = null;
-      for (const entry of candidates.values()) {
-        if (
-          !best ||
-          entry.count > best.count ||
-          (entry.count === best.count && entry.distance < best.distance)
-        ) {
-          best = entry;
-        }
-      }
-      return best.rgba;
+      const pixelIndex = y * width + x;
+      const p = pixelIndex * 4;
+      if (!isOldSelectedPixel(selectedPixels, width, x, y)) continue;
+      if (movedPixels[p + 3] > ALPHA_THRESHOLD) continue;
+
+      if (!hasStationaryNeighbor(selectedPixels, width, height, x, y, 2)) continue;
+      target[pixelIndex] = 1;
     }
   }
-  return null;
+
+  return target;
+}
+
+function patchScore(
+  targetX,
+  targetY,
+  candidateX,
+  candidateY,
+  workingPixels,
+  originalPixels,
+  selectedPixels,
+  movedPixels,
+  targetMask,
+  unresolved,
+  width,
+  height
+) {
+  let score = 0;
+  let samples = 0;
+
+  for (let oy = -PATCH_RADIUS; oy <= PATCH_RADIUS; oy += 1) {
+    for (let ox = -PATCH_RADIUS; ox <= PATCH_RADIUS; ox += 1) {
+      const tx = targetX + ox;
+      const ty = targetY + oy;
+      const cx = candidateX + ox;
+      const cy = candidateY + oy;
+      if (!insideImage(width, height, tx, ty) || !insideImage(width, height, cx, cy)) continue;
+
+      const targetIndex = ty * width + tx;
+      const candidateIndex = cy * width + cx;
+      const tp = targetIndex * 4;
+      const cp = candidateIndex * 4;
+
+      if (targetMask[targetIndex] && unresolved[targetIndex]) continue;
+      if (movedPixels[tp + 3] > ALPHA_THRESHOLD) continue;
+      if (selectedPixels[cp + 3] > ALPHA_THRESHOLD) continue;
+
+      const ta = workingPixels[tp + 3];
+      const ca = originalPixels[cp + 3];
+      const alphaMismatch = Math.abs(ta - ca);
+      score += alphaMismatch * alphaMismatch * 2;
+
+      if (ta > ALPHA_THRESHOLD && ca > ALPHA_THRESHOLD) {
+        const dr = workingPixels[tp] - originalPixels[cp];
+        const dg = workingPixels[tp + 1] - originalPixels[cp + 1];
+        const db = workingPixels[tp + 2] - originalPixels[cp + 2];
+        score += dr * dr + dg * dg + db * db;
+      }
+
+      samples += 1;
+    }
+  }
+
+  if (samples < MIN_PATCH_SAMPLES) return Number.POSITIVE_INFINITY;
+  const distancePenalty = Math.hypot(candidateX - targetX, candidateY - targetY) * 12;
+  return score / samples + distancePenalty;
+}
+
+function findBestPatchColor(
+  targetX,
+  targetY,
+  workingPixels,
+  originalPixels,
+  selectedPixels,
+  movedPixels,
+  targetMask,
+  unresolved,
+  width,
+  height
+) {
+  let bestScore = Number.POSITIVE_INFINITY;
+  let bestColor = null;
+
+  const minX = Math.max(0, targetX - SEARCH_RADIUS);
+  const maxX = Math.min(width - 1, targetX + SEARCH_RADIUS);
+  const minY = Math.max(0, targetY - SEARCH_RADIUS);
+  const maxY = Math.min(height - 1, targetY + SEARCH_RADIUS);
+
+  for (let cy = minY; cy <= maxY; cy += 1) {
+    for (let cx = minX; cx <= maxX; cx += 1) {
+      if (!isStationarySourcePixel(selectedPixels, width, cx, cy)) continue;
+
+      const score = patchScore(
+        targetX,
+        targetY,
+        cx,
+        cy,
+        workingPixels,
+        originalPixels,
+        selectedPixels,
+        movedPixels,
+        targetMask,
+        unresolved,
+        width,
+        height
+      );
+      if (score >= bestScore) continue;
+
+      const cp = (cy * width + cx) * 4;
+      bestScore = score;
+      bestColor = [
+        originalPixels[cp],
+        originalPixels[cp + 1],
+        originalPixels[cp + 2],
+        originalPixels[cp + 3]
+      ];
+    }
+  }
+
+  return bestColor;
+}
+
+function knownNeighborCount(targetMask, unresolved, width, height, x, y) {
+  let count = 0;
+  for (let oy = -1; oy <= 1; oy += 1) {
+    for (let ox = -1; ox <= 1; ox += 1) {
+      if (ox === 0 && oy === 0) continue;
+      const nx = x + ox;
+      const ny = y + oy;
+      if (!insideImage(width, height, nx, ny)) continue;
+      const index = ny * width + nx;
+      if (!targetMask[index] || !unresolved[index]) count += 1;
+    }
+  }
+  return count;
 }
 
 function repairExposedArea() {
-  if (!loadedImage || !lasso || lasso.length < 3) {
+  if (!loadedImage || !pivot || !lasso || lasso.length < 3) {
     lastRepairCount = 0;
     return 0;
   }
@@ -150,45 +260,64 @@ function repairExposedArea() {
   const selectedImage = partCtx.getImageData(0, 0, width, height);
   const movedImage = movedPartCtx.getImageData(0, 0, width, height);
 
-  const outputPixels = outputImage.data;
+  const workingPixels = new Uint8ClampedArray(outputImage.data);
   const originalPixels = originalImage.data;
   const selectedPixels = selectedImage.data;
   const movedPixels = movedImage.data;
+  const targetMask = buildRepairMask(selectedPixels, movedPixels, width, height);
+  const unresolved = new Uint8Array(targetMask);
+
+  let remaining = unresolved.reduce((sum, value) => sum + value, 0);
   let repairedCount = 0;
 
-  // The old implementation only repaired pixels whose output alpha was exactly 0.
-  // Canvas lasso edges are anti-aliased, so visibly damaged pixels can retain partial
-  // alpha and never satisfy that test. Instead, detect the old opaque part footprint
-  // directly and ask whether the transformed part still covers each source pixel.
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const p = (y * width + x) * 4;
-      if (selectedPixels[p + 3] <= SELECTED_ALPHA_THRESHOLD) continue;
-      if (movedPixels[p + 3] > MOVED_COVERAGE_THRESHOLD) continue;
+  while (remaining > 0) {
+    let bestTargetIndex = -1;
+    let bestKnownCount = -1;
 
-      // Do not fill the whole old lever silhouette. Only repair pixels close to the
-      // stationary sprite, which isolates the attachment/hinge hole while leaving the
-      // lever's former path against transparent background transparent.
-      if (!isNearStationarySprite(originalPixels, selectedPixels, width, height, x, y)) continue;
-
-      const color = bestNearbyStationaryColor(
-        originalPixels,
-        selectedPixels,
-        width,
-        height,
-        x,
-        y
-      );
-      if (!color) continue;
-
-      outputPixels[p] = color[0];
-      outputPixels[p + 1] = color[1];
-      outputPixels[p + 2] = color[2];
-      outputPixels[p + 3] = color[3];
-      repairedCount += 1;
+    for (let index = 0; index < unresolved.length; index += 1) {
+      if (!unresolved[index]) continue;
+      const x = index % width;
+      const y = Math.floor(index / width);
+      const knownCount = knownNeighborCount(targetMask, unresolved, width, height, x, y);
+      if (knownCount > bestKnownCount) {
+        bestKnownCount = knownCount;
+        bestTargetIndex = index;
+      }
     }
+
+    if (bestTargetIndex < 0) break;
+    const targetX = bestTargetIndex % width;
+    const targetY = Math.floor(bestTargetIndex / width);
+    const color = findBestPatchColor(
+      targetX,
+      targetY,
+      workingPixels,
+      originalPixels,
+      selectedPixels,
+      movedPixels,
+      targetMask,
+      unresolved,
+      width,
+      height
+    );
+
+    if (!color) {
+      unresolved[bestTargetIndex] = 0;
+      remaining -= 1;
+      continue;
+    }
+
+    const p = bestTargetIndex * 4;
+    workingPixels[p] = color[0];
+    workingPixels[p + 1] = color[1];
+    workingPixels[p + 2] = color[2];
+    workingPixels[p + 3] = color[3];
+    unresolved[bestTargetIndex] = 0;
+    remaining -= 1;
+    repairedCount += 1;
   }
 
+  outputImage.data.set(workingPixels);
   outputCtx.putImageData(outputImage, 0, 0);
   lastRepairCount = repairedCount;
   return repairedCount;
@@ -201,16 +330,6 @@ renderOutput = function (...args) {
   updateFixButton();
 };
 
-function refreshFixedPreview() {
-  baseRenderOutput();
-  if (exposedAreaFixEnabled) {
-    repairExposedArea();
-  } else {
-    lastRepairCount = 0;
-  }
-  updateFixButton();
-}
-
 const baseResetMotion = resetMotion;
 resetMotion = function (...args) {
   exposedAreaFixEnabled = false;
@@ -221,39 +340,18 @@ resetMotion = function (...args) {
 };
 
 fixButton.addEventListener('click', () => {
-  if (!loadedImage || !lasso || lasso.length < 3) {
+  if (!loadedImage || !pivot || !lasso || lasso.length < 3) {
     updateFixButton();
     return;
   }
 
   exposedAreaFixEnabled = !exposedAreaFixEnabled;
-  refreshFixedPreview();
-});
-
-// app.js renders first. This second pass immediately reapplies attachment repair as
-// the user drags a motion slider or types a value, so Motion Preview is always live.
-[
-  rotationInput,
-  rotationSlider,
-  translateXInput,
-  translateXSlider,
-  translateYInput,
-  translateYSlider
-].forEach(control => {
-  control.addEventListener('input', () => {
-    if (!exposedAreaFixEnabled) return;
-    requestAnimationFrame(refreshFixedPreview);
-  });
+  lastRepairCount = 0;
+  renderOutput();
 });
 
 sourceCanvas.addEventListener('pointerdown', () => {
   if (tool !== 'select' || !exposedAreaFixEnabled) return;
-  exposedAreaFixEnabled = false;
-  lastRepairCount = 0;
-  updateFixButton();
-});
-
-clearSelectionButton.addEventListener('click', () => {
   exposedAreaFixEnabled = false;
   lastRepairCount = 0;
   updateFixButton();
